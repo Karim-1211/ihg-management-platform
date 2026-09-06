@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+@theme {
+  --color-navy: #1F3A5F;
+  --color-navy-dark: #152943;
+  --color-red: #FF2147;
+  --color-red-dark: #D91A3B;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
