@@ -1,10 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
-
-/* =========================================================
-   ICONS
-========================================================= */
+import NotificationBell from '../notifications/NotificationBell'
 
 function ChevronIcon({ open = false }) {
   return (
@@ -98,10 +95,6 @@ function LogoutIcon() {
   )
 }
 
-/* =========================================================
-   DESKTOP DROPDOWN
-========================================================= */
-
 function DesktopDropdown({
   id,
   label,
@@ -111,26 +104,20 @@ function DesktopDropdown({
   setOpenMenu,
 }) {
   const location = useLocation()
-
   const isOpen = openMenu === id
-
   const hasActiveItem = items.some(
     (item) => location.pathname === item.to
   )
-
   function handleToggle(event) {
     event.preventDefault()
     event.stopPropagation()
-
     setOpenMenu((previous) =>
       previous === id ? null : id
     )
   }
-
   function handleItemClick() {
     setOpenMenu(null)
   }
-
   return (
     <div className="relative">
       <button
@@ -157,12 +144,9 @@ function DesktopDropdown({
         <span className="shrink-0">
           {icon}
         </span>
-
         <span>{label}</span>
-
         <ChevronIcon open={isOpen} />
       </button>
-
       {isOpen && (
         <div
           role="menu"
@@ -183,7 +167,6 @@ function DesktopDropdown({
         >
           {items.map((item) => {
             const active = location.pathname === item.to
-
             return (
               <Link
                 key={item.to}
@@ -207,7 +190,6 @@ function DesktopDropdown({
                 `}
               >
                 <span>{item.label}</span>
-
                 {active && (
                   <span className="w-1.5 h-1.5 rounded-full bg-red" />
                 )}
@@ -219,10 +201,6 @@ function DesktopDropdown({
     </div>
   )
 }
-
-/* =========================================================
-   MOBILE SECTION
-========================================================= */
 
 function MobileSection({
   label,
@@ -236,12 +214,10 @@ function MobileSection({
         <span className="text-navy">
           {icon}
         </span>
-
         <span className="text-sm font-bold text-navy">
           {label}
         </span>
       </div>
-
       <div className="p-1">
         {items.map((item) => (
           <Link
@@ -269,23 +245,13 @@ function MobileSection({
   )
 }
 
-/* =========================================================
-   NAVBAR
-========================================================= */
-
 export default function Navbar() {
   const { user, logout } = useAuth()
   const location = useLocation()
-
   const [openMenu, setOpenMenu] = useState(null)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [accountOpen, setAccountOpen] = useState(false)
-
   const navbarRef = useRef(null)
-
-  /* =======================================================
-     CLOSE MENUS WHEN CLICKING OUTSIDE NAVBAR
-  ======================================================= */
 
   useEffect(() => {
     function handlePointerDown(event) {
@@ -297,12 +263,10 @@ export default function Navbar() {
         setAccountOpen(false)
       }
     }
-
     document.addEventListener(
       'pointerdown',
       handlePointerDown
     )
-
     return () => {
       document.removeEventListener(
         'pointerdown',
@@ -310,10 +274,6 @@ export default function Navbar() {
       )
     }
   }, [])
-
-  /* =======================================================
-     ESCAPE KEY
-  ======================================================= */
 
   useEffect(() => {
     function handleEscape(event) {
@@ -323,12 +283,10 @@ export default function Navbar() {
         setMobileOpen(false)
       }
     }
-
     document.addEventListener(
       'keydown',
       handleEscape
     )
-
     return () => {
       document.removeEventListener(
         'keydown',
@@ -337,19 +295,11 @@ export default function Navbar() {
     }
   }, [])
 
-  /* =======================================================
-     CLOSE MENUS WHEN ROUTE CHANGES
-  ======================================================= */
-
   useEffect(() => {
     setOpenMenu(null)
     setAccountOpen(false)
     setMobileOpen(false)
   }, [location.pathname])
-
-  /* =======================================================
-     MENU DATA
-  ======================================================= */
 
   const hotelItems = [
     {
@@ -365,7 +315,6 @@ export default function Navbar() {
       label: 'My Invoices',
     },
   ]
-
   const restaurantItems = [
     {
       to: '/restaurants',
@@ -384,7 +333,6 @@ export default function Navbar() {
       label: 'My Bills',
     },
   ]
-
   const deliveryItems = [
     {
       to: '/restaurants',
@@ -396,10 +344,6 @@ export default function Navbar() {
     },
   ]
 
-  /* =======================================================
-     ACCOUNT
-  ======================================================= */
-
   const firstName = user?.first_name || 'User'
   const lastName = user?.last_name || ''
   const email = user?.email || ''
@@ -408,34 +352,21 @@ export default function Navbar() {
   function toggleAccount(event) {
     event.preventDefault()
     event.stopPropagation()
-
     setOpenMenu(null)
-
     setAccountOpen((previous) => !previous)
   }
-
-  /* =======================================================
-     LOGOUT
-  ======================================================= */
 
   function handleLogout(event) {
     event.preventDefault()
     event.stopPropagation()
-
     setOpenMenu(null)
     setAccountOpen(false)
     setMobileOpen(false)
-
     logout()
   }
 
-  /* =======================================================
-     MOBILE
-  ======================================================= */
-
   function toggleMobile() {
     setMobileOpen((previous) => !previous)
-
     setOpenMenu(null)
     setAccountOpen(false)
   }
@@ -453,11 +384,6 @@ export default function Navbar() {
     >
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="h-[72px] flex items-center justify-between">
-
-          {/* =================================================
-              BRAND
-          ================================================= */}
-
           <Link
             to="/"
             className="
@@ -469,20 +395,13 @@ export default function Navbar() {
             <span className="text-2xl font-extrabold tracking-tight text-navy">
               IHG
             </span>
-
             <span className="hidden sm:block h-6 w-px bg-gray-200" />
-
             <span className="hidden sm:block text-xs font-medium tracking-widest uppercase text-gray-400">
               Hospitality
             </span>
           </Link>
 
-          {/* =================================================
-              DESKTOP NAVIGATION
-          ================================================= */}
-
           <div className="hidden md:flex items-center gap-1 ml-8 mr-auto">
-
             <DesktopDropdown
               id="hotel"
               label="Hotel"
@@ -494,7 +413,6 @@ export default function Navbar() {
                 setAccountOpen(null)
               }}
             />
-
             <DesktopDropdown
               id="restaurant"
               label="Restaurant"
@@ -506,7 +424,6 @@ export default function Navbar() {
                 setAccountOpen(null)
               }}
             />
-
             <DesktopDropdown
               id="delivery"
               label="Delivery"
@@ -518,113 +435,99 @@ export default function Navbar() {
                 setAccountOpen(null)
               }}
             />
-
           </div>
 
-          {/* =================================================
-              DESKTOP ACCOUNT
-          ================================================= */}
-
-          <div className="hidden md:block relative">
-
-            <button
-              type="button"
-              aria-haspopup="menu"
-              aria-expanded={accountOpen}
-              onClick={toggleAccount}
-              className={`
-                flex items-center gap-3
-                px-2
-                py-1.5
-                rounded-xl
-                cursor-pointer
-                select-none
-                transition-colors
-                ${
-                  accountOpen
-                    ? 'bg-gray-100'
-                    : 'hover:bg-gray-50'
-                }
-              `}
-            >
-              <span className="w-9 h-9 rounded-full bg-navy flex items-center justify-center text-sm font-bold text-white">
-                {initial}
-              </span>
-
-              <div className="text-left hidden lg:block">
-                <p className="text-sm font-semibold text-navy leading-tight">
-                  {firstName}
-                </p>
-
-                <p className="text-xs text-gray-400 leading-tight mt-0.5">
-                  Account
-                </p>
-              </div>
-
-              <ChevronIcon open={accountOpen} />
-            </button>
-
-            {accountOpen && (
-              <div
-                role="menu"
-                className="
-                  absolute
-                  right-0
-                  top-full
-                  mt-2
-                  w-60
+          <div className="hidden md:flex items-center gap-2">
+            <NotificationBell variant="light" />
+            <div className="relative">
+              <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={accountOpen}
+                onClick={toggleAccount}
+                className={`
+                  flex items-center gap-3
+                  px-2
+                  py-1.5
                   rounded-xl
-                  border
-                  border-gray-100
-                  bg-white
-                  py-2
-                  shadow-2xl
-                  z-[200]
-                "
+                  cursor-pointer
+                  select-none
+                  transition-colors
+                  ${
+                    accountOpen
+                      ? 'bg-gray-100'
+                      : 'hover:bg-gray-50'
+                  }
+                `}
               >
-                <div className="px-4 py-3 border-b border-gray-100">
-                  <p className="text-sm font-semibold text-navy">
-                    {firstName} {lastName}
+                <span className="w-9 h-9 rounded-full bg-navy flex items-center justify-center text-sm font-bold text-white">
+                  {initial}
+                </span>
+                <div className="text-left hidden lg:block">
+                  <p className="text-sm font-semibold text-navy leading-tight">
+                    {firstName}
                   </p>
-
-                  <p className="text-xs text-gray-400 mt-1 break-all">
-                    {email}
+                  <p className="text-xs text-gray-400 leading-tight mt-0.5">
+                    Account
                   </p>
                 </div>
-
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={handleLogout}
+                <ChevronIcon open={accountOpen} />
+              </button>
+              {accountOpen && (
+                <div
+                  role="menu"
                   className="
-                    w-full
-                    flex
-                    items-center
-                    justify-between
-                    px-4
-                    py-3
-                    mt-1
-                    text-left
-                    text-sm
-                    font-medium
-                    text-gray-700
-                    hover:bg-gray-50
-                    hover:text-red
-                    cursor-pointer
-                    transition-colors
+                    absolute
+                    right-0
+                    top-full
+                    mt-2
+                    w-60
+                    rounded-xl
+                    border
+                    border-gray-100
+                    bg-white
+                    py-2
+                    shadow-2xl
+                    z-[200]
                   "
                 >
-                  <span>Sign out</span>
-                  <LogoutIcon />
-                </button>
-              </div>
-            )}
-
+                  <div className="px-4 py-3 border-b border-gray-100">
+                    <p className="text-sm font-semibold text-navy">
+                      {firstName} {lastName}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-1 break-all">
+                      {email}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={handleLogout}
+                    className="
+                      w-full
+                      flex
+                      items-center
+                      justify-between
+                      px-4
+                      py-3
+                      mt-1
+                      text-left
+                      text-sm
+                      font-medium
+                      text-gray-700
+                      hover:bg-gray-50
+                      hover:text-red
+                      cursor-pointer
+                      transition-colors
+                    "
+                  >
+                    <span>Sign out</span>
+                    <LogoutIcon />
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-
-          {/* =================================================
-              MOBILE BUTTON
-          ================================================= */}
 
           <button
             type="button"
@@ -671,13 +574,8 @@ export default function Navbar() {
               </svg>
             )}
           </button>
-
         </div>
       </div>
-
-      {/* =====================================================
-          MOBILE MENU
-      ===================================================== */}
 
       {mobileOpen && (
         <div
@@ -689,38 +587,35 @@ export default function Navbar() {
           "
         >
           <div className="px-4 py-4 space-y-2">
-
-            <div className="px-3 py-2 mb-3">
-              <p className="text-xs uppercase tracking-wider font-bold text-gray-400">
-                Welcome
-              </p>
-
-              <p className="text-base font-semibold text-navy mt-1">
-                {firstName} {lastName}
-              </p>
+            <div className="px-3 py-2 mb-3 flex items-center justify-between">
+              <div>
+                <p className="text-xs uppercase tracking-wider font-bold text-gray-400">
+                  Welcome
+                </p>
+                <p className="text-base font-semibold text-navy mt-1">
+                  {firstName} {lastName}
+                </p>
+              </div>
+              <NotificationBell variant="light" />
             </div>
-
             <MobileSection
               label="Hotel"
               icon={<HotelIcon />}
               items={hotelItems}
               onClose={() => setMobileOpen(false)}
             />
-
             <MobileSection
               label="Restaurant"
               icon={<RestaurantIcon />}
               items={restaurantItems}
               onClose={() => setMobileOpen(false)}
             />
-
             <MobileSection
               label="Delivery"
               icon={<DeliveryIcon />}
               items={deliveryItems}
               onClose={() => setMobileOpen(false)}
             />
-
             <div className="pt-3 mt-3 border-t border-gray-100">
               <button
                 type="button"
@@ -746,7 +641,6 @@ export default function Navbar() {
                 <LogoutIcon />
               </button>
             </div>
-
           </div>
         </div>
       )}

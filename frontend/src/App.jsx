@@ -27,6 +27,8 @@ import StaffDeliveriesPage from './pages/staff/StaffDeliveriesPage'
 import MyDeliveriesPage from './pages/staff/MyDeliveriesPage'
 import InventoryPage from './pages/staff/InventoryPage'
 import RecipeManagementPage from './pages/staff/RecipeManagementPage'
+import NotificationPreferencesPage from './pages/staff/NotificationPreferencesPage'
+import EmailLogPage from './pages/staff/EmailLogPage'
 import AppLayout from './components/layout/AppLayout'
 
 function HomePage() {
@@ -105,6 +107,22 @@ function App() {
         element={
           <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'MANAGER']}>
             <RecipeManagementPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/staff/notification-preferences"
+        element={
+          <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST', 'HOUSEKEEPING', 'KITCHEN', 'WAITER', 'DELIVERY']}>
+            <NotificationPreferencesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/staff/email-log"
+        element={
+          <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
+            <EmailLogPage />
           </ProtectedRoute>
         }
       />

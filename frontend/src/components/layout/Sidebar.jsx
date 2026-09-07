@@ -1,5 +1,6 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import NotificationBell from '../notifications/NotificationBell'
 
 function IconHotel() {
   return (
@@ -106,9 +107,6 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
   const deliveryItems = []
   const managementItems = []
 
-  /*
-   * HOTEL
-   */
   if (['SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST'].includes(role)) {
     hotelItems.push({ to: '/staff/bookings', label: 'Bookings' })
   }
@@ -122,9 +120,6 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
     hotelItems.push({ to: '/staff/invoices', label: 'Invoices' })
   }
 
-  /*
-   * RESTAURANT
-   */
   if (['SUPER_ADMIN', 'MANAGER', 'WAITER'].includes(role)) {
     restaurantItems.push(
       { to: '/staff/tables', label: 'Tables' },
@@ -137,10 +132,6 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
     restaurantItems.push({ to: '/staff/kitchen', label: 'Kitchen' })
   }
 
-  /*
-   * DELIVERY
-   * Delivery is deliberately separate from Restaurant.
-   */
   if (['SUPER_ADMIN', 'MANAGER', 'WAITER'].includes(role)) {
     deliveryItems.push({ to: '/staff/deliveries', label: 'Deliveries' })
   }
@@ -148,16 +139,21 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
     deliveryItems.push({ to: '/my-deliveries', label: 'My Deliveries' })
   }
 
-  /*
-   * MANAGEMENT
-   */
   if (['SUPER_ADMIN', 'MANAGER'].includes(role)) {
     managementItems.push({ to: '/staff/audit-log', label: 'Audit Log' })
     managementItems.push({ to: '/staff/inventory', label: 'Inventory' })
     managementItems.push({ to: '/staff/recipes', label: 'Recipes' })
+    managementItems.push({ to: '/staff/notification-preferences', label: 'Notification Settings' })
   }
   if (['RECEPTIONIST', 'HOUSEKEEPING', 'KITCHEN', 'WAITER'].includes(role)) {
     managementItems.push({ to: '/staff/inventory', label: 'Inventory' })
+    managementItems.push({ to: '/staff/notification-preferences', label: 'Notification Settings' })
+  }
+  if (role === 'DELIVERY') {
+    managementItems.push({ to: '/staff/notification-preferences', label: 'Notification Settings' })
+  }
+  if (role === 'SUPER_ADMIN') {
+    managementItems.push({ to: '/staff/email-log', label: 'Email Log' })
   }
 
   return (
@@ -194,16 +190,20 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
             </span>
           </Link>
 
-          <button
-            type="button"
-            onClick={onClose}
-            className="lg:hidden p-2 rounded-lg text-white/60 hover:bg-white/10 hover:text-white"
-            aria-label="Close menu"
-          >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M18 6 6 18" />
-            </svg>
-          </button>
+          <div className="flex items-center gap-1">
+            <NotificationBell variant="dark" />
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="lg:hidden p-2 rounded-lg text-white/60 hover:bg-white/10 hover:text-white"
+              aria-label="Close menu"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 6l12 12M18 6 6 18" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <nav className="flex-1 px-3 py-6 overflow-y-auto scrollbar-thin">
