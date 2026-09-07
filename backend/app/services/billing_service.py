@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -156,10 +157,11 @@ def pay_invoice(db: Session, invoice_id: uuid.UUID, guest: User, data: PaymentCr
         invoice_id=invoice.id,
         amount=amount,
         method=data.payment_method,
-        status=PaymentStatus.COMPLETED,
+        status=PaymentStatus.COMPLETED,  # demo mode: always succeeds
         provider="DEMO",
         provider_reference=f"DEMO-{uuid.uuid4().hex[:10].upper()}",
         created_by=guest.id,
+        paid_at=datetime.now(timezone.utc),
     )
     db.add(payment)
     new_amount_paid = already_paid + amount
