@@ -1,15 +1,16 @@
 import uuid
 from decimal import Decimal
-
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.models.restaurant import Order, RestaurantTable
 from app.models.billing import Invoice, InvoiceType, InvoiceStatus, Payment, PaymentStatus
 from app.models.user import User
 from app.schemas.restaurant_billing import RestaurantPaymentCreate
+from app.schemas.notification_event import NotificationEvent
+from app.models.notification import NotificationType
 from app.services.restaurant_service import assert_restaurant_access
 from app.services import audit_service
+from app.services import notification_service
 
 
 def generate_invoice_number() -> str:
@@ -28,7 +29,6 @@ def generate_invoice_for_order(db: Session, order: Order) -> Invoice:
     existing = db.query(Invoice).filter(Invoice.order_id == order.id, Invoice.invoice_type == InvoiceType.RESTAURANT).first()
     if existing:
         return existing
-
     invoice = Invoice(
         invoice_number=generate_invoice_number(),
         invoice_type=InvoiceType.RESTAURANT,
@@ -45,11 +45,21 @@ def generate_invoice_for_order(db: Session, order: Order) -> Invoice:
     db.add(invoice)
     db.commit()
     db.refresh(invoice)
-
     audit_service.log_action(
         db, order.customer_id, "GENERATE_RESTAURANT_INVOICE", "invoice", invoice.id,
         f"Auto-generated invoice {invoice.invoice_number} for order {order.order_number}",
     )
+    notification_service.dispatch(db, NotificationEvent(
+        event_type=NotificationType.INVOICE_CREATED,
+        entity_type="invoice",
+        entity_id=invoice.id,
+        restaurant_id=order.restaurant_id,
+        metadata={
+            "customer_id": str(order.customer_id) if order.customer_id else None,
+            "invoice_number": invoice.invoice_number,
+            "total_amount": str(invoice.total_amount),
+        },
+    ))
     return invoice
 
 
@@ -77,11 +87,9 @@ def get_invoice_for_order(db: Session, order_id: uuid.UUID, current_user: User) 
     invoice = db.query(Invoice).filter(Invoice.order_id == order_id, Invoice.invoice_type == InvoiceType.RESTAURANT).first()
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No invoice exists for this order yet.")
-
     is_owner = invoice.customer_id is not None and invoice.customer_id == current_user.id
     if current_user.role.value == "CUSTOMER" and not is_owner:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only view your own invoice.")
-
     return _attach_display_fields(db, invoice)
 
 
@@ -107,8 +115,6 @@ def list_invoices_for_restaurant(db: Session, current_user: User, restaurant_id:
 
 
 def pay_invoice(db: Session, invoice_id: uuid.UUID, current_user: User, data: RestaurantPaymentCreate) -> Payment:
-    # Row-level lock, same protection as Hotel: prevents two concurrent
-    # payment attempts on the same invoice from both reading a stale balance.
     invoice = (
         db.query(Invoice)
         .filter(Invoice.id == invoice_id, Invoice.invoice_type == InvoiceType.RESTAURANT)
@@ -117,24 +123,19 @@ def pay_invoice(db: Session, invoice_id: uuid.UUID, current_user: User, data: Re
     )
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
-
     is_owner = invoice.customer_id is not None and invoice.customer_id == current_user.id
     is_staff = current_user.role.value in ("SUPER_ADMIN", "MANAGER", "WAITER")
-
     if current_user.role.value == "CUSTOMER" and not is_owner:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only pay your own invoice.")
     if not is_owner and not is_staff:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to process this payment.")
     if is_staff and current_user.role.value == "MANAGER":
         assert_restaurant_access(db, current_user, invoice.restaurant_id)
-
     if invoice.status == InvoiceStatus.PAID:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="This invoice is already paid.")
-
     total_amount = Decimal(str(invoice.total_amount))
     already_paid = Decimal(str(invoice.amount_paid))
     remaining = total_amount - already_paid
-
     amount = Decimal(str(data.amount)) if data.amount is not None else remaining
     if amount <= 0:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Payment amount must be greater than zero.")
@@ -143,28 +144,37 @@ def pay_invoice(db: Session, invoice_id: uuid.UUID, current_user: User, data: Re
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Payment amount exceeds remaining invoice balance (${remaining}).",
         )
-
     payment = Payment(
         payment_number=generate_payment_number(),
         invoice_id=invoice.id,
         amount=amount,
         method=data.payment_method,
-        status=PaymentStatus.COMPLETED,  # demo mode: always succeeds
+        status=PaymentStatus.COMPLETED,
         provider="DEMO",
         provider_reference=f"DEMO-{uuid.uuid4().hex[:10].upper()}",
         created_by=current_user.id,
     )
     db.add(payment)
-
     new_amount_paid = already_paid + amount
     invoice.amount_paid = new_amount_paid
     invoice.status = InvoiceStatus.PAID if new_amount_paid >= total_amount else InvoiceStatus.PARTIALLY_PAID
-
     db.commit()
     db.refresh(payment)
-
     audit_service.log_action(
         db, current_user.id, "PAY_RESTAURANT_INVOICE", "invoice", invoice.id,
         f"Paid ${amount} on invoice {invoice.invoice_number} ({data.payment_method.value}) — status now {invoice.status.value}",
     )
+    payment_customer_id = invoice.customer_id if invoice.customer_id else current_user.id
+    notification_service.dispatch(db, NotificationEvent(
+        event_type=NotificationType.PAYMENT_COMPLETED,
+        actor_user_id=current_user.id,
+        entity_type="payment",
+        entity_id=payment.id,
+        restaurant_id=invoice.restaurant_id,
+        metadata={
+            "customer_id": str(payment_customer_id),
+            "amount": str(amount),
+            "invoice_number": invoice.invoice_number,
+        },
+    ))
     return payment

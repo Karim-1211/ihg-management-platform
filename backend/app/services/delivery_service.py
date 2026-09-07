@@ -1,15 +1,15 @@
 import uuid
 from datetime import datetime, timezone
-
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.models.delivery import Delivery, DeliveryStatus
 from app.models.restaurant import Order, OrderStatus, RestaurantTable
 from app.models.user import User, RoleEnum
+from app.schemas.notification_event import NotificationEvent
+from app.models.notification import NotificationType
 from app.services.restaurant_service import assert_restaurant_access
 from app.services import audit_service
-
+from app.services import notification_service
 
 VALID_DELIVERY_TRANSITIONS = {
     DeliveryStatus.PENDING: [DeliveryStatus.ASSIGNED, DeliveryStatus.CANCELLED],
@@ -80,13 +80,11 @@ def list_my_deliveries(db: Session, driver_id: uuid.UUID) -> list[Delivery]:
 def assign_driver(db: Session, current_user: User, delivery_id: uuid.UUID, driver_id: uuid.UUID) -> Delivery:
     delivery = get_delivery_or_404(db, delivery_id)
     order = _order_and_boundary_check(db, current_user, delivery)
-
     if delivery.status != DeliveryStatus.PENDING:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Cannot assign a driver to a delivery with status {delivery.status.value}.",
         )
-
     driver = db.query(User).filter(User.id == driver_id, User.role == RoleEnum.DELIVERY).first()
     if not driver:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Delivery driver not found.")
@@ -95,62 +93,85 @@ def assign_driver(db: Session, current_user: User, delivery_id: uuid.UUID, drive
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="This driver is not assigned to this restaurant.",
         )
-
     delivery.delivery_staff_id = driver.id
     delivery.status = DeliveryStatus.ASSIGNED
     delivery.assigned_at = datetime.now(timezone.utc)
-
     db.commit()
     db.refresh(delivery)
-
     audit_service.log_action(
         db, current_user.id, "ASSIGN_DRIVER", "delivery", delivery.id,
         f"Assigned {driver.first_name} {driver.last_name} to delivery for order {order.order_number}",
     )
+    notification_service.dispatch(db, NotificationEvent(
+        event_type=NotificationType.DELIVERY_ASSIGNED,
+        actor_user_id=current_user.id,
+        entity_type="delivery",
+        entity_id=delivery.id,
+        restaurant_id=order.restaurant_id,
+        metadata={
+            "driver_id": str(driver.id),
+            "order_number": order.order_number,
+        },
+    ))
     return _attach_display_fields(db, delivery)
 
 
 def update_delivery_status(db: Session, current_user: User, delivery_id: uuid.UUID, new_status: DeliveryStatus) -> Delivery:
     delivery = get_delivery_or_404(db, delivery_id)
     order = _order_and_boundary_check(db, current_user, delivery)
-
     if current_user.role == RoleEnum.DELIVERY and delivery.delivery_staff_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only update deliveries assigned to you.",
         )
-
     allowed_next = VALID_DELIVERY_TRANSITIONS.get(delivery.status, [])
     if new_status not in allowed_next:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Cannot move delivery from {delivery.status.value} to {new_status.value}.",
         )
-
     delivery.status = new_status
     now = datetime.now(timezone.utc)
     if new_status == DeliveryStatus.PICKED_UP:
         delivery.picked_up_at = now
     elif new_status == DeliveryStatus.DELIVERED:
         delivery.delivered_at = now
-
     db.commit()
     db.refresh(delivery)
 
+    if new_status == DeliveryStatus.OUT_FOR_DELIVERY:
+        notification_service.dispatch(db, NotificationEvent(
+            event_type=NotificationType.DELIVERY_OUT_FOR_DELIVERY,
+            actor_user_id=current_user.id,
+            entity_type="delivery",
+            entity_id=delivery.id,
+            restaurant_id=order.restaurant_id,
+            metadata={
+                "order_number": order.order_number,
+                "customer_id": str(order.customer_id) if order.customer_id else None,
+            },
+        ))
+
     if new_status == DeliveryStatus.DELIVERED:
-        # Controlled cross-state-machine transition: delivery completion marks
-        # the order SERVED, which in turn triggers invoice generation — the
-        # single point where these two independent lifecycles intersect.
         order.status = OrderStatus.SERVED
         db.commit()
         db.refresh(order)
-
         from app.services import restaurant_billing_service
         restaurant_billing_service.generate_invoice_for_order(db, order)
-
         audit_service.log_action(
             db, current_user.id, "DELIVER_ORDER", "order", order.id,
             f"Order {order.order_number} delivered, marked SERVED",
         )
+        notification_service.dispatch(db, NotificationEvent(
+            event_type=NotificationType.DELIVERY_DELIVERED,
+            actor_user_id=current_user.id,
+            entity_type="delivery",
+            entity_id=delivery.id,
+            restaurant_id=order.restaurant_id,
+            metadata={
+                "order_number": order.order_number,
+                "customer_id": str(order.customer_id) if order.customer_id else None,
+            },
+        ))
 
     return _attach_display_fields(db, delivery)
