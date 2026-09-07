@@ -3,7 +3,8 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    String, Numeric, ForeignKey, DateTime, Enum as SQLEnum, CheckConstraint, Text,
+    String, Numeric, ForeignKey, DateTime, Enum as SQLEnum, CheckConstraint,
+    UniqueConstraint, Text, Index, text,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -42,15 +43,19 @@ class PaymentStatus(str, enum.Enum):
 class Invoice(Base):
     __tablename__ = "invoices"
     __table_args__ = (
+        UniqueConstraint("invoice_number", name="invoices_invoice_number_key"),
         CheckConstraint(
             "(invoice_type = 'HOTEL' AND booking_id IS NOT NULL AND order_id IS NULL AND restaurant_id IS NULL) OR "
             "(invoice_type = 'RESTAURANT' AND order_id IS NOT NULL AND booking_id IS NULL AND restaurant_id IS NOT NULL)",
             name="ck_invoice_type_matches_reference",
         ),
+        CheckConstraint("total_amount >= 0", name="ck_invoice_total_nonnegative"),
+        CheckConstraint("amount_paid >= 0", name="ck_invoice_amount_paid_nonnegative"),
+        CheckConstraint("amount_paid <= total_amount", name="ck_invoice_amount_paid_not_exceed_total"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    invoice_number: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
+    invoice_number: Mapped[str] = mapped_column(String(20), nullable=False)
     invoice_type: Mapped[InvoiceType] = mapped_column(SQLEnum(InvoiceType, name="invoice_type_enum"), nullable=False)
 
     booking_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("bookings.id"), unique=True, nullable=True)
@@ -77,9 +82,17 @@ class Invoice(Base):
 
 class Payment(Base):
     __tablename__ = "payments"
+    __table_args__ = (
+        UniqueConstraint("payment_number", name="payments_payment_number_key"),
+        CheckConstraint("amount > 0", name="ck_payment_amount_positive"),
+        Index(
+            "uq_payments_provider_reference", "provider", "provider_reference",
+            unique=True, postgresql_where=text("provider_reference IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    payment_number: Mapped[str] = mapped_column(String(20), unique=True, nullable=False, index=True)
+    payment_number: Mapped[str] = mapped_column(String(20), nullable=False)
     invoice_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("invoices.id"), nullable=False)
 
     amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)

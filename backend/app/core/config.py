@@ -16,6 +16,9 @@ class Settings(BaseSettings):
     tax_rate: float = 0.05  # 5% demo tax rate
     default_reservation_minutes: int = 90  # default table reservation duration
 
+    # Phase 15: notifications
+    email_mode: str = "DEMO"  # DEMO = never sends real email, always marks SENT instantly
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 
