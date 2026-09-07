@@ -1,14 +1,15 @@
 import uuid
 from datetime import datetime, timezone
-
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.models.hotel import Booking, BookingStatus, Room
 from app.models.service_request import ServiceRequest, ServiceRequestStatus
 from app.models.user import User
 from app.schemas.hotel import ServiceRequestCreate
+from app.schemas.notification_event import NotificationEvent
+from app.models.notification import NotificationType
 from app.services import audit_service
+from app.services import notification_service
 
 
 def _attach_display_fields(db: Session, request: ServiceRequest) -> ServiceRequest:
@@ -28,19 +29,16 @@ def create_service_request(db: Session, guest: User, data: ServiceRequestCreate)
     booking = db.query(Booking).filter(Booking.id == data.booking_id).first()
     if not booking:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found.")
-
     if booking.guest_id != guest.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You can only request service for your own booking.",
         )
-
     if booking.status != BookingStatus.CHECKED_IN:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Service requests are only available during an active stay (checked in).",
         )
-
     request = ServiceRequest(
         booking_id=booking.id,
         requested_by=guest.id,
@@ -50,6 +48,18 @@ def create_service_request(db: Session, guest: User, data: ServiceRequestCreate)
     db.add(request)
     db.commit()
     db.refresh(request)
+    room = db.query(Room).filter(Room.id == booking.room_id).first()
+    notification_service.dispatch(db, NotificationEvent(
+        event_type=NotificationType.SERVICE_REQUEST_CREATED,
+        actor_user_id=guest.id,
+        entity_type="service_request",
+        entity_id=request.id,
+        hotel_id=room.hotel_id if room else None,
+        metadata={
+            "request_type": data.request_type.value,
+            "room_number": room.room_number if room else "N/A",
+        },
+    ))
     return _attach_display_fields(db, request)
 
 
@@ -79,7 +89,6 @@ def update_service_request(
     request = db.query(ServiceRequest).filter(ServiceRequest.id == request_id).first()
     if not request:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Service request not found.")
-
     request.status = new_status
     if assigned_to is not None:
         request.assigned_to = assigned_to
@@ -87,15 +96,23 @@ def update_service_request(
         request.price = price
     if new_status == ServiceRequestStatus.COMPLETED:
         request.completed_at = datetime.now(timezone.utc)
-
     db.commit()
     db.refresh(request)
-
     if new_status == ServiceRequestStatus.COMPLETED:
         price_note = f" (charged ${price})" if price else " (no charge)"
         audit_service.log_action(
             db, current_user.id, "COMPLETE_SERVICE_REQUEST", "service_request", request.id,
             f"Completed {request.request_type.value} request{price_note}",
         )
-
+        booking = db.query(Booking).filter(Booking.id == request.booking_id).first()
+        notification_service.dispatch(db, NotificationEvent(
+            event_type=NotificationType.SERVICE_REQUEST_COMPLETED,
+            actor_user_id=current_user.id,
+            entity_type="service_request",
+            entity_id=request.id,
+            metadata={
+                "customer_id": str(booking.guest_id) if booking else None,
+                "request_type": request.request_type.value,
+            },
+        ))
     return _attach_display_fields(db, request)
