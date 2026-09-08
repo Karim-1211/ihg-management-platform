@@ -4,7 +4,7 @@ from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 
 from app.models.hotel import Booking, BookingStatus, Room, RoomStatus
-from app.models.restaurant import Order, OrderType, Restaurant
+from app.models.restaurant import Order, OrderType, OrderStatus, Restaurant
 from app.models.delivery import Delivery, DeliveryStatus
 from app.models.inventory import InventoryItem
 from app.models.billing import Payment, PaymentStatus
@@ -32,19 +32,17 @@ def _resolve_scope(db: Session, current_user: User) -> tuple[list, list]:
     see. SUPER_ADMIN sees everything (empty list = no filter). MANAGER is
     scoped to their own hotel_id, plus any restaurant belonging to that hotel."""
     if current_user.role == RoleEnum.SUPER_ADMIN:
-        return [], []  # empty = unfiltered / global
+        return [], []
 
     if current_user.role == RoleEnum.MANAGER:
         hotel_ids = [current_user.hotel_id] if current_user.hotel_id else []
         restaurant_ids = [
             r.id for r in db.query(Restaurant.id).filter(Restaurant.hotel_id.in_(hotel_ids)).all()
         ] if hotel_ids else []
-        # A manager's own restaurant_id (if directly assigned) is also included.
         if current_user.restaurant_id and current_user.restaurant_id not in restaurant_ids:
             restaurant_ids.append(current_user.restaurant_id)
         return hotel_ids, restaurant_ids
 
-    # Should not be reached — router restricts to SUPER_ADMIN/MANAGER only.
     return [], []
 
 
@@ -143,8 +141,6 @@ def get_dashboard_overview(db: Session, current_user: User) -> DashboardOverview
     delivery = DeliveryOverview(applicable=restaurant_applicable, active_deliveries=active_deliveries)
 
     # ---------- INVENTORY ----------
-    # Uses the same authoritative low-stock definition as inventory_service.py's
-    # _attach_low_stock_flag: current_quantity <= minimum_quantity.
     inv_query = db.query(func.count(InventoryItem.id)).filter(
         InventoryItem.is_active == True,  # noqa: E712
         InventoryItem.current_quantity <= InventoryItem.minimum_quantity,
@@ -165,16 +161,11 @@ def get_dashboard_overview(db: Session, current_user: User) -> DashboardOverview
     )
 
     # ---------- FINANCIAL ----------
-    # Revenue Today = COMPLETED payments only, filtered by paid_at (never
-    # created_at), within today's UTC calendar day. See dashboard_constants.py.
     revenue_query = db.query(func.coalesce(func.sum(Payment.amount), 0)).filter(
         Payment.status == PaymentStatus.COMPLETED,
         Payment.paid_at >= today_start,
         Payment.paid_at < today_end,
     )
-    # Note: scoping Payment by hotel/restaurant requires joining through Invoice;
-    # deferred to keep this slice's query count bounded. SUPER_ADMIN sees global
-    # revenue in 16.1; per-scope revenue filtering is a 16.1b/17 refinement.
     revenue_today = float(revenue_query.scalar() or 0)
 
     financial = FinancialOverview(revenue_today=revenue_today)
@@ -213,6 +204,22 @@ def get_dashboard_overview(db: Session, current_user: User) -> DashboardOverview
             category="low_stock",
             count=low_stock_count,
             label=f"{low_stock_count} inventory item(s) below minimum stock",
+        ))
+
+    kitchen_cutoff = datetime.now(timezone.utc) - timedelta(minutes=const.KITCHEN_PREPARATION_ESCALATION_MINUTES)
+    kitchen_query = db.query(func.count(Order.id)).filter(
+        Order.status == OrderStatus.PREPARING,
+        Order.preparing_started_at.isnot(None),
+        Order.preparing_started_at < kitchen_cutoff,
+    )
+    if restaurant_ids:
+        kitchen_query = kitchen_query.filter(Order.restaurant_id.in_(restaurant_ids))
+    kitchen_bottleneck_count = kitchen_query.scalar() or 0
+    if kitchen_bottleneck_count > 0:
+        attention.append(AttentionItem(
+            category="kitchen_bottleneck",
+            count=kitchen_bottleneck_count,
+            label=f"{kitchen_bottleneck_count} order(s) preparing over {const.KITCHEN_PREPARATION_ESCALATION_MINUTES} minutes",
         ))
 
     return DashboardOverviewResponse(

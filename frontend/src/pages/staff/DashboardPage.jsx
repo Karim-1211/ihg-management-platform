@@ -12,12 +12,14 @@ const ATTENTION_ROUTES = {
   service_request: '/staff/service-requests',
   failed_payment: '/staff/invoices',
   low_stock: '/staff/inventory',
+  kitchen_bottleneck: '/staff/kitchen',
 }
 
 const ATTENTION_STYLES = {
   service_request: { iconBg: 'bg-amber-50', iconColor: 'text-amber-600', dot: 'bg-amber-500', border: 'border-amber-300' },
   failed_payment: { iconBg: 'bg-red-50', iconColor: 'text-red-600', dot: 'bg-red-500', border: 'border-red-300' },
   low_stock: { iconBg: 'bg-red-50', iconColor: 'text-red-600', dot: 'bg-red-500', border: 'border-red-300' },
+  kitchen_bottleneck: { iconBg: 'bg-amber-50', iconColor: 'text-amber-600', dot: 'bg-amber-500', border: 'border-amber-300' },
 }
 
 /* =========================================================
@@ -103,7 +105,7 @@ function IconArrowRight({ className = 'w-4 h-4' }) {
 }
 
 /* =========================================================
-   KPI CARD — color-shifting hover
+   KPI CARD
 ========================================================= */
 
 const KPI_STYLES = {
@@ -188,7 +190,7 @@ function StatusRail({ overview }) {
 }
 
 /* =========================================================
-   SECTION CARD — real tinted title bar with its own shadow
+   SECTION CARD
 ========================================================= */
 
 const SECTION_STYLES = {

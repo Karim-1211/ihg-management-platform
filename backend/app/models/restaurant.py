@@ -146,6 +146,11 @@ class Order(Base):
     status: Mapped[OrderStatus] = mapped_column(
         SQLEnum(OrderStatus, name="order_status_enum"), nullable=False, default=OrderStatus.NEW
     )
+    # Set exactly once, only on the NEW/CONFIRMED -> PREPARING transition inside
+    # update_order_status. Deliberately NOT reused from updated_at, since that
+    # field is bumped by unrelated changes (e.g. assign_waiter) and would
+    # silently corrupt the "how long has this been preparing" calculation.
+    preparing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     subtotal: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     tax_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     discount_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)

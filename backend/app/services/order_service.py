@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -194,6 +195,13 @@ def update_order_status(db: Session, current_user: User, order_id: uuid.UUID, ne
     if new_status == OrderStatus.CONFIRMED:
         order_items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
         inventory_service.deduct_stock_for_order(db, order, order_items)
+
+    if new_status == OrderStatus.PREPARING:
+        # Set exactly once, only here. Never touched by any other code path
+        # (e.g. assign_waiter), so it accurately reflects kitchen entry time
+        # and isn't corrupted by unrelated order updates.
+        order.preparing_started_at = datetime.now(timezone.utc)
+
     order.status = new_status
     if new_status == OrderStatus.SERVED and order.table_id:
         table = db.query(RestaurantTable).filter(RestaurantTable.id == order.table_id).first()
