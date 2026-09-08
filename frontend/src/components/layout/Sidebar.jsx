@@ -107,6 +107,10 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
   const deliveryItems = []
   const managementItems = []
 
+  if (['SUPER_ADMIN', 'MANAGER'].includes(role)) {
+    managementItems.push({ to: '/staff/dashboard', label: 'Dashboard' })
+  }
+
   if (['SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST'].includes(role)) {
     hotelItems.push({ to: '/staff/bookings', label: 'Bookings' })
   }
@@ -207,10 +211,10 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
         </div>
 
         <nav className="flex-1 px-3 py-6 overflow-y-auto scrollbar-thin">
+          <NavGroup icon={<IconManagement />} label="Management" items={managementItems} currentPath={location.pathname} />
           <NavGroup icon={<IconHotel />} label="Hotel" items={hotelItems} currentPath={location.pathname} />
           <NavGroup icon={<IconRestaurant />} label="Restaurant" items={restaurantItems} currentPath={location.pathname} />
           <NavGroup icon={<IconDelivery />} label="Delivery" items={deliveryItems} currentPath={location.pathname} />
-          <NavGroup icon={<IconManagement />} label="Management" items={managementItems} currentPath={location.pathname} />
         </nav>
 
         <div className="px-3 py-4 border-t border-white/10 shrink-0">

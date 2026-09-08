@@ -29,6 +29,7 @@ import InventoryPage from './pages/staff/InventoryPage'
 import RecipeManagementPage from './pages/staff/RecipeManagementPage'
 import NotificationPreferencesPage from './pages/staff/NotificationPreferencesPage'
 import EmailLogPage from './pages/staff/EmailLogPage'
+import DashboardPage from './pages/staff/DashboardPage'
 import AppLayout from './components/layout/AppLayout'
 
 function HomePage() {
@@ -123,6 +124,14 @@ function App() {
         element={
           <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
             <EmailLogPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/staff/dashboard"
+        element={
+          <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'MANAGER']}>
+            <DashboardPage />
           </ProtectedRoute>
         }
       />
