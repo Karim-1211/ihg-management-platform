@@ -16,6 +16,7 @@ from app.schemas.dashboard import (
     OrdersTodayBreakdown, AttentionItem,
 )
 from app.services import dashboard_constants as const
+from app.services import business_rule_service
 
 
 def _today_utc_bounds() -> tuple[datetime, datetime]:
@@ -173,7 +174,8 @@ def get_dashboard_overview(db: Session, current_user: User) -> DashboardOverview
     # ---------- ATTENTION ----------
     attention: list[AttentionItem] = []
 
-    escalation_cutoff = datetime.now(timezone.utc) - timedelta(minutes=const.SERVICE_REQUEST_ESCALATION_MINUTES)
+    service_request_minutes = business_rule_service.get_service_request_escalation_minutes(db)
+    escalation_cutoff = datetime.now(timezone.utc) - timedelta(minutes=service_request_minutes)
     overdue_query = db.query(func.count(ServiceRequest.id)).filter(
         ServiceRequest.status == ServiceRequestStatus.PENDING,
         ServiceRequest.created_at < escalation_cutoff,
@@ -183,7 +185,7 @@ def get_dashboard_overview(db: Session, current_user: User) -> DashboardOverview
         attention.append(AttentionItem(
             category="service_request",
             count=overdue_count,
-            label=f"{overdue_count} service request(s) pending over {const.SERVICE_REQUEST_ESCALATION_MINUTES} minutes",
+            label=f"{overdue_count} service request(s) pending over {service_request_minutes} minutes",
         ))
 
     failed_cutoff = datetime.now(timezone.utc) - timedelta(hours=const.FAILED_PAYMENT_LOOKBACK_HOURS)
@@ -206,7 +208,8 @@ def get_dashboard_overview(db: Session, current_user: User) -> DashboardOverview
             label=f"{low_stock_count} inventory item(s) below minimum stock",
         ))
 
-    kitchen_cutoff = datetime.now(timezone.utc) - timedelta(minutes=const.KITCHEN_PREPARATION_ESCALATION_MINUTES)
+    kitchen_bottleneck_minutes = business_rule_service.get_kitchen_bottleneck_minutes(db)
+    kitchen_cutoff = datetime.now(timezone.utc) - timedelta(minutes=kitchen_bottleneck_minutes)
     kitchen_query = db.query(func.count(Order.id)).filter(
         Order.status == OrderStatus.PREPARING,
         Order.preparing_started_at.isnot(None),
@@ -219,7 +222,7 @@ def get_dashboard_overview(db: Session, current_user: User) -> DashboardOverview
         attention.append(AttentionItem(
             category="kitchen_bottleneck",
             count=kitchen_bottleneck_count,
-            label=f"{kitchen_bottleneck_count} order(s) preparing over {const.KITCHEN_PREPARATION_ESCALATION_MINUTES} minutes",
+            label=f"{kitchen_bottleneck_count} order(s) preparing over {kitchen_bottleneck_minutes} minutes",
         ))
 
     return DashboardOverviewResponse(

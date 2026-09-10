@@ -1,9 +1,7 @@
 import uuid
-from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from app.core.config import settings
 from app.models.restaurant import (
     Order, OrderItem, OrderType, OrderStatus, MenuItem, RestaurantTable,
 )
@@ -14,6 +12,7 @@ from app.models.notification import NotificationType
 from app.services.restaurant_service import assert_restaurant_access, get_restaurant_or_404
 from app.services import audit_service
 from app.services import notification_service
+from app.services import business_rule_service
 
 
 def _round_currency(value: Decimal) -> Decimal:
@@ -27,31 +26,16 @@ def generate_order_number() -> str:
 def _validate_order_type_fields(data: OrderCreate) -> None:
     if data.order_type == OrderType.DINE_IN:
         if not data.table_id:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="table_id is required for a DINE_IN order.",
-            )
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="table_id is required for a DINE_IN order.")
         if data.booking_id or data.delivery_address:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="DINE_IN orders cannot include booking_id or delivery_address.",
-            )
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="DINE_IN orders cannot include booking_id or delivery_address.")
     elif data.order_type == OrderType.ROOM_SERVICE:
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="ROOM_SERVICE orders are not yet available.",
-        )
+        raise HTTPException(status_code=status.HTTP_501_NOT_IMPLEMENTED, detail="ROOM_SERVICE orders are not yet available.")
     elif data.order_type == OrderType.DELIVERY:
         if not data.delivery_address:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="delivery_address is required for a DELIVERY order.",
-            )
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="delivery_address is required for a DELIVERY order.")
         if data.table_id or data.booking_id:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="DELIVERY orders cannot include table_id or booking_id.",
-            )
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="DELIVERY orders cannot include table_id or booking_id.")
 
 
 def create_order(db: Session, current_user: User, data: OrderCreate) -> Order:
@@ -76,27 +60,17 @@ def create_order(db: Session, current_user: User, data: OrderCreate) -> Order:
         unit_price = Decimal(str(menu_item.price))
         line_subtotal = _round_currency(unit_price * line.quantity)
         subtotal += line_subtotal
-        order_items.append(OrderItem(
-            menu_item_id=menu_item.id,
-            quantity=line.quantity,
-            unit_price=unit_price,
-            subtotal=line_subtotal,
-        ))
-    tax_amount = _round_currency(subtotal * Decimal(str(settings.tax_rate)))
+        order_items.append(OrderItem(menu_item_id=menu_item.id, quantity=line.quantity, unit_price=unit_price, subtotal=line_subtotal))
+
+    tax_rate = business_rule_service.get_tax_rate(db)
+    tax_amount = _round_currency(subtotal * tax_rate)
     discount_amount = Decimal("0")
     total_amount = _round_currency(subtotal + tax_amount - discount_amount)
     order = Order(
-        order_number=generate_order_number(),
-        order_type=data.order_type,
-        restaurant_id=data.restaurant_id,
+        order_number=generate_order_number(), order_type=data.order_type, restaurant_id=data.restaurant_id,
         customer_id=current_user.id if current_user.role == RoleEnum.CUSTOMER else None,
-        table_id=data.table_id,
-        delivery_address=data.delivery_address,
-        status=OrderStatus.NEW,
-        subtotal=subtotal,
-        tax_amount=tax_amount,
-        discount_amount=discount_amount,
-        total_amount=total_amount,
+        table_id=data.table_id, delivery_address=data.delivery_address, status=OrderStatus.NEW,
+        subtotal=subtotal, tax_amount=tax_amount, discount_amount=discount_amount, total_amount=total_amount,
     )
     db.add(order)
     db.flush()
@@ -110,17 +84,10 @@ def create_order(db: Session, current_user: User, data: OrderCreate) -> Order:
         db.add(delivery)
     db.commit()
     db.refresh(order)
-    audit_service.log_action(
-        db, current_user.id, "CREATE_ORDER", "order", order.id,
-        f"Created {data.order_type.value} order {order.order_number} (${total_amount})",
-    )
+    audit_service.log_action(db, current_user.id, "CREATE_ORDER", "order", order.id, f"Created {data.order_type.value} order {order.order_number} (${total_amount})")
     notification_service.dispatch(db, NotificationEvent(
-        event_type=NotificationType.ORDER_CREATED,
-        actor_user_id=current_user.id,
-        entity_type="order",
-        entity_id=order.id,
-        restaurant_id=order.restaurant_id,
-        metadata={"order_number": order.order_number},
+        event_type=NotificationType.ORDER_CREATED, actor_user_id=current_user.id, entity_type="order",
+        entity_id=order.id, restaurant_id=order.restaurant_id, metadata={"order_number": order.order_number},
     ))
     return _attach_display_fields(db, order)
 
@@ -148,22 +115,12 @@ def get_order_or_404(db: Session, order_id: uuid.UUID) -> Order:
 
 def list_orders_for_restaurant(db: Session, current_user: User, restaurant_id: uuid.UUID) -> list[Order]:
     assert_restaurant_access(db, current_user, restaurant_id)
-    orders = (
-        db.query(Order)
-        .filter(Order.restaurant_id == restaurant_id)
-        .order_by(Order.created_at.desc())
-        .all()
-    )
+    orders = db.query(Order).filter(Order.restaurant_id == restaurant_id).order_by(Order.created_at.desc()).all()
     return [_attach_display_fields(db, o) for o in orders]
 
 
 def list_my_orders(db: Session, customer_id: uuid.UUID) -> list[Order]:
-    orders = (
-        db.query(Order)
-        .filter(Order.customer_id == customer_id)
-        .order_by(Order.created_at.desc())
-        .all()
-    )
+    orders = db.query(Order).filter(Order.customer_id == customer_id).order_by(Order.created_at.desc()).all()
     return [_attach_display_fields(db, o) for o in orders]
 
 
@@ -182,26 +139,16 @@ def update_order_status(db: Session, current_user: User, order_id: uuid.UUID, ne
     order = get_order_or_404(db, order_id)
     assert_restaurant_access(db, current_user, order.restaurant_id)
     if order.order_type == OrderType.DELIVERY and new_status == OrderStatus.SERVED:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Delivery orders are marked SERVED automatically once the delivery is completed.",
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Delivery orders are marked SERVED automatically once the delivery is completed.")
     allowed_next = VALID_TRANSITIONS.get(order.status, [])
     if new_status not in allowed_next:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Cannot move order from {order.status.value} to {new_status.value}.",
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Cannot move order from {order.status.value} to {new_status.value}.")
     if new_status == OrderStatus.CONFIRMED:
         order_items = db.query(OrderItem).filter(OrderItem.order_id == order.id).all()
         inventory_service.deduct_stock_for_order(db, order, order_items)
-
     if new_status == OrderStatus.PREPARING:
-        # Set exactly once, only here. Never touched by any other code path
-        # (e.g. assign_waiter), so it accurately reflects kitchen entry time
-        # and isn't corrupted by unrelated order updates.
+        from datetime import datetime, timezone
         order.preparing_started_at = datetime.now(timezone.utc)
-
     order.status = new_status
     if new_status == OrderStatus.SERVED and order.table_id:
         table = db.query(RestaurantTable).filter(RestaurantTable.id == order.table_id).first()
@@ -209,35 +156,20 @@ def update_order_status(db: Session, current_user: User, order_id: uuid.UUID, ne
             table.status = table.status.__class__.CLEANING
     db.commit()
     db.refresh(order)
-
     if new_status == OrderStatus.READY:
         notification_service.dispatch(db, NotificationEvent(
-            event_type=NotificationType.ORDER_READY,
-            actor_user_id=current_user.id,
-            entity_type="order",
-            entity_id=order.id,
-            restaurant_id=order.restaurant_id,
-            metadata={
-                "order_number": order.order_number,
-                "customer_id": str(order.customer_id) if order.customer_id else None,
-            },
+            event_type=NotificationType.ORDER_READY, actor_user_id=current_user.id, entity_type="order",
+            entity_id=order.id, restaurant_id=order.restaurant_id,
+            metadata={"order_number": order.order_number, "customer_id": str(order.customer_id) if order.customer_id else None},
         ))
-
     if new_status == OrderStatus.SERVED:
         from app.services import restaurant_billing_service
         restaurant_billing_service.generate_invoice_for_order(db, order)
         notification_service.dispatch(db, NotificationEvent(
-            event_type=NotificationType.ORDER_SERVED,
-            actor_user_id=current_user.id,
-            entity_type="order",
-            entity_id=order.id,
-            restaurant_id=order.restaurant_id,
-            metadata={
-                "order_number": order.order_number,
-                "customer_id": str(order.customer_id) if order.customer_id else None,
-            },
+            event_type=NotificationType.ORDER_SERVED, actor_user_id=current_user.id, entity_type="order",
+            entity_id=order.id, restaurant_id=order.restaurant_id,
+            metadata={"order_number": order.order_number, "customer_id": str(order.customer_id) if order.customer_id else None},
         ))
-
     return _attach_display_fields(db, order)
 
 
@@ -248,10 +180,7 @@ def assign_waiter(db: Session, current_user: User, order_id: uuid.UUID, waiter_i
     if not waiter:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Waiter not found.")
     if waiter.restaurant_id != order.restaurant_id:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="This waiter is not assigned to this restaurant.",
-        )
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="This waiter is not assigned to this restaurant.")
     order.assigned_waiter_id = waiter.id
     db.commit()
     db.refresh(order)

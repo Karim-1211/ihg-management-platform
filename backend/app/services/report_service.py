@@ -19,6 +19,7 @@ from app.schemas.reports import (
     InventoryReportResponse, OperationsReportResponse, StatusCount,
 )
 from app.services import report_constants as const
+from app.services import business_rule_service
 
 
 def _resolve_scope(db: Session, current_user: User) -> tuple[list, list]:
@@ -189,7 +190,9 @@ def get_executive_report(
         return_=inv_counts.get("RETURN", 0), service_usage=inv_counts.get("SERVICE_USAGE", 0),
     )
 
-    escalation_cutoff = datetime.now(timezone.utc) - timedelta(minutes=_dash_const().SERVICE_REQUEST_ESCALATION_MINUTES)
+    escalation_cutoff = datetime.now(timezone.utc) - timedelta(
+        minutes=business_rule_service.get_service_request_escalation_minutes(db)
+    )
     overdue_count = db.query(func.count(ServiceRequest.id)).filter(
         ServiceRequest.status == ServiceRequestStatus.PENDING, ServiceRequest.created_at < escalation_cutoff,
     ).scalar() or 0
@@ -200,11 +203,6 @@ def get_executive_report(
         inventory_activity_total=inventory_activity_total, inventory_activity_by_type=inventory_activity_by_type,
         overdue_service_requests_now=overdue_count,
     )
-
-
-def _dash_const():
-    from app.services import dashboard_constants
-    return dashboard_constants
 
 
 # ---------- 17.2 Hotel ----------
@@ -261,8 +259,6 @@ def get_hotel_report(db: Session, current_user: User, preset: str, custom_start:
     check_outs_scheduled = _period_value(check_outs_scheduled_in(current_start, current_end), check_outs_scheduled_in(compare_start, compare_end))
 
     def room_night_demand_in(d_from: date, d_to: date):
-        # Sum, per overlapping booking, of nights within [d_from, d_to] using
-        # the correct stay-interval rule: check_in_date <= day < check_out_date.
         q = db.query(Booking.check_in_date, Booking.check_out_date).join(Room, Booking.room_id == Room.id).filter(
             Booking.status != BookingStatus.CANCELLED,
             Booking.check_in_date < (d_to + timedelta(days=1)),
@@ -530,7 +526,9 @@ def get_operations_report(db: Session, current_user: User, preset: str, custom_s
 
     service_requests_completed = _period_value(sr_completed_in(cur_from, cur_to), sr_completed_in(prev_from, prev_to))
 
-    escalation_cutoff = datetime.now(timezone.utc) - timedelta(minutes=_dash_const().SERVICE_REQUEST_ESCALATION_MINUTES)
+    escalation_cutoff = datetime.now(timezone.utc) - timedelta(
+        minutes=business_rule_service.get_service_request_escalation_minutes(db)
+    )
     overdue_now = db.query(func.count(ServiceRequest.id)).filter(
         ServiceRequest.status == ServiceRequestStatus.PENDING, ServiceRequest.created_at < escalation_cutoff,
     ).scalar() or 0

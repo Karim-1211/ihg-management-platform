@@ -142,3 +142,15 @@ def check_for_conflict(
                     f"Existing rule id: {existing.id}."
                 ),
             )
+
+
+def get_tax_rate(db: Session) -> Decimal:
+    return resolve_rule(db, RuleLookup(rule_key="BILLING_TAX_RATE")).value
+
+
+def get_service_request_escalation_minutes(db: Session) -> int:
+    return int(resolve_rule(db, RuleLookup(rule_key="OPERATIONS_SERVICE_REQUEST_ESCALATION_MINUTES")).value)
+
+
+def get_kitchen_bottleneck_minutes(db: Session) -> int:
+    return int(resolve_rule(db, RuleLookup(rule_key="OPERATIONS_KITCHEN_BOTTLENECK_MINUTES")).value)

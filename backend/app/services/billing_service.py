@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
-from app.core.config import settings
 from app.models.hotel import Booking, Room
 from app.models.billing import Invoice, InvoiceType, InvoiceStatus, Payment, PaymentStatus
 from app.models.service_request import ServiceRequest, ServiceRequestStatus
@@ -13,6 +12,7 @@ from app.schemas.notification_event import NotificationEvent
 from app.models.notification import NotificationType
 from app.services import audit_service
 from app.services import notification_service
+from app.services import business_rule_service
 
 
 def _round_currency(value: Decimal) -> Decimal:
@@ -32,50 +32,27 @@ def generate_invoice_for_booking(db: Session, booking: Booking) -> Invoice:
     if existing:
         return existing
     room_charge = Decimal(str(booking.total_amount))
-    billable_requests = (
-        db.query(ServiceRequest)
-        .filter(
-            ServiceRequest.booking_id == booking.id,
-            ServiceRequest.status == ServiceRequestStatus.COMPLETED,
-            ServiceRequest.price.isnot(None),
-        )
-        .all()
-    )
+    billable_requests = db.query(ServiceRequest).filter(
+        ServiceRequest.booking_id == booking.id, ServiceRequest.status == ServiceRequestStatus.COMPLETED, ServiceRequest.price.isnot(None),
+    ).all()
     service_charge = sum((Decimal(str(r.price)) for r in billable_requests), Decimal("0"))
     subtotal = room_charge + service_charge
-    tax_amount = _round_currency(subtotal * Decimal(str(settings.tax_rate)))
+    tax_rate = business_rule_service.get_tax_rate(db)
+    tax_amount = _round_currency(subtotal * tax_rate)
     discount_amount = Decimal("0")
     total_amount = _round_currency(subtotal + tax_amount - discount_amount)
     invoice = Invoice(
-        invoice_number=generate_invoice_number(),
-        invoice_type=InvoiceType.HOTEL,
-        booking_id=booking.id,
-        customer_id=booking.guest_id,
-        room_charge=room_charge,
-        service_charge=service_charge,
-        subtotal=subtotal,
-        tax_amount=tax_amount,
-        discount_amount=discount_amount,
-        total_amount=total_amount,
-        amount_paid=Decimal("0"),
-        status=InvoiceStatus.UNPAID,
+        invoice_number=generate_invoice_number(), invoice_type=InvoiceType.HOTEL, booking_id=booking.id, customer_id=booking.guest_id,
+        room_charge=room_charge, service_charge=service_charge, subtotal=subtotal, tax_amount=tax_amount,
+        discount_amount=discount_amount, total_amount=total_amount, amount_paid=Decimal("0"), status=InvoiceStatus.UNPAID,
     )
     db.add(invoice)
     db.commit()
     db.refresh(invoice)
-    audit_service.log_action(
-        db, booking.guest_id, "GENERATE_INVOICE", "invoice", invoice.id,
-        f"Auto-generated invoice {invoice.invoice_number} for booking {booking.booking_reference}",
-    )
+    audit_service.log_action(db, booking.guest_id, "GENERATE_INVOICE", "invoice", invoice.id, f"Auto-generated invoice {invoice.invoice_number} for booking {booking.booking_reference}")
     notification_service.dispatch(db, NotificationEvent(
-        event_type=NotificationType.INVOICE_CREATED,
-        entity_type="invoice",
-        entity_id=invoice.id,
-        metadata={
-            "customer_id": str(booking.guest_id),
-            "invoice_number": invoice.invoice_number,
-            "total_amount": str(invoice.total_amount),
-        },
+        event_type=NotificationType.INVOICE_CREATED, entity_type="invoice", entity_id=invoice.id,
+        metadata={"customer_id": str(booking.guest_id), "invoice_number": invoice.invoice_number, "total_amount": str(invoice.total_amount)},
     ))
     return invoice
 
@@ -109,32 +86,17 @@ def get_invoice_for_booking(db: Session, booking_id: uuid.UUID, current_user: Us
 
 
 def list_my_invoices(db: Session, guest_id: uuid.UUID) -> list[Invoice]:
-    invoices = (
-        db.query(Invoice)
-        .filter(Invoice.customer_id == guest_id, Invoice.invoice_type == InvoiceType.HOTEL)
-        .order_by(Invoice.issued_at.desc())
-        .all()
-    )
+    invoices = db.query(Invoice).filter(Invoice.customer_id == guest_id, Invoice.invoice_type == InvoiceType.HOTEL).order_by(Invoice.issued_at.desc()).all()
     return [_attach_display_fields(db, i) for i in invoices]
 
 
 def list_all_invoices(db: Session) -> list[Invoice]:
-    invoices = (
-        db.query(Invoice)
-        .filter(Invoice.invoice_type == InvoiceType.HOTEL)
-        .order_by(Invoice.issued_at.desc())
-        .all()
-    )
+    invoices = db.query(Invoice).filter(Invoice.invoice_type == InvoiceType.HOTEL).order_by(Invoice.issued_at.desc()).all()
     return [_attach_display_fields(db, i) for i in invoices]
 
 
 def pay_invoice(db: Session, invoice_id: uuid.UUID, guest: User, data: PaymentCreate) -> Payment:
-    invoice = (
-        db.query(Invoice)
-        .filter(Invoice.id == invoice_id)
-        .with_for_update()
-        .first()
-    )
+    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).with_for_update().first()
     if not invoice:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invoice not found.")
     if invoice.customer_id != guest.id:
@@ -148,20 +110,11 @@ def pay_invoice(db: Session, invoice_id: uuid.UUID, guest: User, data: PaymentCr
     if amount <= 0:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Payment amount must be greater than zero.")
     if amount > remaining:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"Payment amount exceeds remaining invoice balance (${remaining}).",
-        )
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Payment amount exceeds remaining invoice balance (${remaining}).")
     payment = Payment(
-        payment_number=generate_payment_number(),
-        invoice_id=invoice.id,
-        amount=amount,
-        method=data.payment_method,
-        status=PaymentStatus.COMPLETED,  # demo mode: always succeeds
-        provider="DEMO",
-        provider_reference=f"DEMO-{uuid.uuid4().hex[:10].upper()}",
-        created_by=guest.id,
-        paid_at=datetime.now(timezone.utc),
+        payment_number=generate_payment_number(), invoice_id=invoice.id, amount=amount, method=data.payment_method,
+        status=PaymentStatus.COMPLETED, provider="DEMO", provider_reference=f"DEMO-{uuid.uuid4().hex[:10].upper()}",
+        created_by=guest.id, paid_at=datetime.now(timezone.utc),
     )
     db.add(payment)
     new_amount_paid = already_paid + amount
@@ -169,19 +122,9 @@ def pay_invoice(db: Session, invoice_id: uuid.UUID, guest: User, data: PaymentCr
     invoice.status = InvoiceStatus.PAID if new_amount_paid >= total_amount else InvoiceStatus.PARTIALLY_PAID
     db.commit()
     db.refresh(payment)
-    audit_service.log_action(
-        db, guest.id, "PAY_INVOICE", "invoice", invoice.id,
-        f"Paid ${amount} on invoice {invoice.invoice_number} ({data.payment_method.value}) — status now {invoice.status.value}",
-    )
+    audit_service.log_action(db, guest.id, "PAY_INVOICE", "invoice", invoice.id, f"Paid ${amount} on invoice {invoice.invoice_number} ({data.payment_method.value}) — status now {invoice.status.value}")
     notification_service.dispatch(db, NotificationEvent(
-        event_type=NotificationType.PAYMENT_COMPLETED,
-        actor_user_id=guest.id,
-        entity_type="payment",
-        entity_id=payment.id,
-        metadata={
-            "customer_id": str(guest.id),
-            "amount": str(amount),
-            "invoice_number": invoice.invoice_number,
-        },
+        event_type=NotificationType.PAYMENT_COMPLETED, actor_user_id=guest.id, entity_type="payment", entity_id=payment.id,
+        metadata={"customer_id": str(guest.id), "amount": str(amount), "invoice_number": invoice.invoice_number},
     ))
     return payment
