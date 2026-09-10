@@ -4,13 +4,13 @@ from datetime import timedelta
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.models.restaurant import (
     RestaurantTable, TableReservation, ReservationStatus, Restaurant,
 )
-from app.models.user import User
+from app.models.user import User, RoleEnum
 from app.schemas.restaurant import TableReservationCreate
 from app.services.restaurant_service import assert_restaurant_access, get_table_or_404
+from app.services import business_rule_service
 
 
 def has_overlapping_reservation(
@@ -36,7 +36,8 @@ def create_reservation(db: Session, customer: User, data: TableReservationCreate
 
     reservation_end = data.reservation_end
     if reservation_end is None:
-        reservation_end = data.reservation_start + timedelta(minutes=settings.default_reservation_minutes)
+        default_minutes = business_rule_service.get_default_reservation_minutes(db)
+        reservation_end = data.reservation_start + timedelta(minutes=default_minutes)
 
     if reservation_end <= data.reservation_start:
         raise HTTPException(

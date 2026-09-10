@@ -42,8 +42,6 @@ def _candidates_at_scope(
         query = query.filter(BusinessRule.hotel_id.is_(None), BusinessRule.restaurant_id.is_(None))
 
     rows = query.all()
-    # effective_until is nullable (open-ended); filter in Python since a
-    # NULL comparison in SQL would incorrectly exclude open-ended rules.
     return [r for r in rows if r.effective_until is None or r.effective_until > now]
 
 
@@ -53,7 +51,6 @@ def _pick_highest_priority(rule_key: str, scope_label: str, candidates: list[Bus
     max_priority = max(r.priority for r in candidates)
     top = [r for r in candidates if r.priority == max_priority]
     if len(top) > 1:
-        # Locked design: ambiguity is a data-entry error, never silently resolved.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
@@ -106,10 +103,8 @@ def check_for_conflict(
     effective_until: datetime | None,
     exclude_rule_id: uuid.UUID | None = None,
 ) -> None:
-    """Write-time conflict check, per the locked design: same rule_key +
-    same effective scope + same priority + ACTIVE + overlapping effective
-    windows = reject. Scope inheritance (a HOTEL rule alongside a GLOBAL
-    rule for the same key) is NOT a conflict — only same-scope collisions are."""
+    """Write-time conflict check: same rule_key + same effective scope +
+    same priority + ACTIVE + overlapping effective windows = reject."""
     query = db.query(BusinessRule).filter(
         BusinessRule.rule_key == rule_key,
         BusinessRule.scope_type == scope_type,
@@ -129,8 +124,6 @@ def check_for_conflict(
     for existing in query.all():
         existing_end = existing.effective_until
         new_end = effective_until
-        # Two windows overlap unless one entirely ends before the other begins.
-        # NULL end = open-ended (treated as +infinity for this comparison).
         starts_after_existing_ends = existing_end is not None and effective_from >= existing_end
         existing_starts_after_new_ends = new_end is not None and existing.effective_from >= new_end
         if not starts_after_existing_ends and not existing_starts_after_new_ends:
@@ -154,3 +147,7 @@ def get_service_request_escalation_minutes(db: Session) -> int:
 
 def get_kitchen_bottleneck_minutes(db: Session) -> int:
     return int(resolve_rule(db, RuleLookup(rule_key="OPERATIONS_KITCHEN_BOTTLENECK_MINUTES")).value)
+
+
+def get_default_reservation_minutes(db: Session) -> int:
+    return int(resolve_rule(db, RuleLookup(rule_key="RESTAURANT_DEFAULT_RESERVATION_MINUTES")).value)
