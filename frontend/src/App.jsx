@@ -31,6 +31,7 @@ import NotificationPreferencesPage from './pages/staff/NotificationPreferencesPa
 import EmailLogPage from './pages/staff/EmailLogPage'
 import DashboardPage from './pages/staff/DashboardPage'
 import ReportsPage from './pages/staff/ReportsPage'
+import BusinessRulesPage from './pages/staff/BusinessRulesPage'
 import AppLayout from './components/layout/AppLayout'
 
 function HomePage() {
@@ -141,6 +142,14 @@ function App() {
         element={
           <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'MANAGER']}>
             <ReportsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/staff/business-rules"
+        element={
+          <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'MANAGER']}>
+            <BusinessRulesPage />
           </ProtectedRoute>
         }
       />

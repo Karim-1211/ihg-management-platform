@@ -108,9 +108,10 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
   const managementItems = []
 
   if (['SUPER_ADMIN', 'MANAGER'].includes(role)) {
-  managementItems.push({ to: '/staff/dashboard', label: 'Dashboard' })
-  managementItems.push({ to: '/staff/reports', label: 'Reports' })
-}
+    managementItems.push({ to: '/staff/dashboard', label: 'Dashboard' })
+    managementItems.push({ to: '/staff/reports', label: 'Reports' })
+    managementItems.push({ to: '/staff/business-rules', label: 'Business Rules' })
+  }
 
   if (['SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST'].includes(role)) {
     hotelItems.push({ to: '/staff/bookings', label: 'Bookings' })
