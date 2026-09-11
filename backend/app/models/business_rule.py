@@ -24,6 +24,7 @@ class RuleValueType(str, enum.Enum):
     PERCENTAGE = "PERCENTAGE"
     MINUTES = "MINUTES"
     INTEGER = "INTEGER"
+    HOURS = "HOURS"
 
 
 class RuleStatus(str, enum.Enum):
@@ -45,7 +46,8 @@ class BusinessRule(Base):
         CheckConstraint(
             "(value_type = 'PERCENTAGE' AND numeric_value >= 0 AND numeric_value <= 1) OR "
             "(value_type = 'MINUTES' AND numeric_value >= 0) OR "
-            "(value_type = 'INTEGER' AND numeric_value >= 0 AND numeric_value = trunc(numeric_value))",
+            "(value_type = 'INTEGER' AND numeric_value >= 0 AND numeric_value = trunc(numeric_value)) OR "
+            "(value_type = 'HOURS' AND numeric_value >= 0)",
             name="ck_business_rule_value_matches_type",
         ),
         Index(
