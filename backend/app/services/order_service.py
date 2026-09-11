@@ -2,6 +2,7 @@ import uuid
 from decimal import Decimal, ROUND_HALF_UP
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
+from app.core.config import settings
 from app.models.restaurant import (
     Order, OrderItem, OrderType, OrderStatus, MenuItem, RestaurantTable,
 )
@@ -64,13 +65,18 @@ def create_order(db: Session, current_user: User, data: OrderCreate) -> Order:
 
     tax_rate = business_rule_service.get_tax_rate(db)
     tax_amount = _round_currency(subtotal * tax_rate)
+
+    service_charge_rate = business_rule_service.get_restaurant_service_charge_rate(db, restaurant_id=data.restaurant_id)
+    service_charge_amount = _round_currency(subtotal * service_charge_rate)
+
     discount_amount = Decimal("0")
-    total_amount = _round_currency(subtotal + tax_amount - discount_amount)
+    total_amount = _round_currency(subtotal + tax_amount + service_charge_amount - discount_amount)
     order = Order(
         order_number=generate_order_number(), order_type=data.order_type, restaurant_id=data.restaurant_id,
         customer_id=current_user.id if current_user.role == RoleEnum.CUSTOMER else None,
         table_id=data.table_id, delivery_address=data.delivery_address, status=OrderStatus.NEW,
-        subtotal=subtotal, tax_amount=tax_amount, discount_amount=discount_amount, total_amount=total_amount,
+        subtotal=subtotal, tax_amount=tax_amount, service_charge_amount=service_charge_amount,
+        discount_amount=discount_amount, total_amount=total_amount,
     )
     db.add(order)
     db.flush()

@@ -36,6 +36,7 @@ def generate_invoice_for_order(db: Session, order: Order) -> Invoice:
         order_id=order.id,
         restaurant_id=order.restaurant_id,
         customer_id=order.customer_id,
+        service_charge=order.service_charge_amount,
         subtotal=order.subtotal,
         tax_amount=order.tax_amount,
         discount_amount=order.discount_amount,

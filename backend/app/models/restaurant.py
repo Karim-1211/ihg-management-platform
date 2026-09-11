@@ -153,6 +153,7 @@ class Order(Base):
     preparing_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     subtotal: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     tax_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    service_charge_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     discount_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     total_amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

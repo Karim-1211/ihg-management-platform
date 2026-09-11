@@ -182,6 +182,14 @@ def get_maximum_advance_booking_days(db: Session, hotel_id: uuid.UUID | None = N
     return int(resolve_rule(db, RuleLookup(rule_key="HOTEL_MAXIMUM_ADVANCE_BOOKING_DAYS", hotel_id=hotel_id)).value)
 
 
+def get_restaurant_service_charge_rate(db: Session, restaurant_id: uuid.UUID | None = None) -> Decimal:
+    return resolve_rule(db, RuleLookup(rule_key="RESTAURANT_SERVICE_CHARGE_RATE", restaurant_id=restaurant_id)).value
+
+
+def get_restaurant_service_charge_rate(db: Session, restaurant_id: uuid.UUID | None = None) -> Decimal:
+    return resolve_rule(db, RuleLookup(rule_key="RESTAURANT_SERVICE_CHARGE_RATE", restaurant_id=restaurant_id)).value
+
+
 # =========================================================
 # MANAGEMENT — locked in 18.6, unchanged
 # =========================================================
