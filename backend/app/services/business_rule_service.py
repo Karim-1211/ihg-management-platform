@@ -144,6 +144,8 @@ def check_for_conflict(
             )
 
 
+# ---------- Category A resolver helpers (18.5, unchanged) ----------
+
 def get_tax_rate(db: Session) -> Decimal:
     return resolve_rule(db, RuleLookup(rule_key="BILLING_TAX_RATE")).value
 
@@ -160,8 +162,28 @@ def get_default_reservation_minutes(db: Session) -> int:
     return int(resolve_rule(db, RuleLookup(rule_key="RESTAURANT_DEFAULT_RESERVATION_MINUTES")).value)
 
 
+# ---------- Category B resolver helpers — new in 18.7A ----------
+# Each accepts an optional hotel_id so a hotel-specific override is honored
+# via the existing HOTEL > GLOBAL precedence, exactly like every other rule.
+
+def get_cancellation_deadline_hours(db: Session, hotel_id: uuid.UUID | None = None) -> Decimal:
+    return resolve_rule(db, RuleLookup(rule_key="HOTEL_CANCELLATION_DEADLINE_HOURS", hotel_id=hotel_id)).value
+
+
+def get_minimum_stay_nights(db: Session, hotel_id: uuid.UUID | None = None) -> int:
+    return int(resolve_rule(db, RuleLookup(rule_key="HOTEL_MINIMUM_STAY_NIGHTS", hotel_id=hotel_id)).value)
+
+
+def get_maximum_stay_nights(db: Session, hotel_id: uuid.UUID | None = None) -> int:
+    return int(resolve_rule(db, RuleLookup(rule_key="HOTEL_MAXIMUM_STAY_NIGHTS", hotel_id=hotel_id)).value)
+
+
+def get_maximum_advance_booking_days(db: Session, hotel_id: uuid.UUID | None = None) -> int:
+    return int(resolve_rule(db, RuleLookup(rule_key="HOTEL_MAXIMUM_ADVANCE_BOOKING_DAYS", hotel_id=hotel_id)).value)
+
+
 # =========================================================
-# MANAGEMENT — new in 18.6
+# MANAGEMENT — locked in 18.6, unchanged
 # =========================================================
 
 def _assert_scope_access(
@@ -214,6 +236,9 @@ def _assert_value_type_range(value_type: RuleValueType, numeric_value: Decimal) 
     elif value_type == RuleValueType.MINUTES:
         if numeric_value < 0:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="MINUTES values must not be negative.")
+    elif value_type == RuleValueType.HOURS:
+        if numeric_value < 0:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="HOURS values must not be negative.")
     elif value_type == RuleValueType.INTEGER:
         if numeric_value < 0 or numeric_value != numeric_value.to_integral_value():
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="INTEGER values must be a non-negative whole number.")
@@ -230,8 +255,6 @@ def create_rule(db: Session, current_user: User, data: BusinessRuleCreate) -> Bu
 
     priority = data.priority or 0
 
-    # New rules always start ACTIVE in this slice — there is no "create
-    # inactive" path — so a conflict check always applies.
     check_for_conflict(db, data.rule_key, data.scope_type, data.hotel_id, data.restaurant_id, priority, effective_from, data.effective_until)
 
     rule = BusinessRule(
@@ -313,8 +336,6 @@ def update_rule(db: Session, current_user: User, rule_id: uuid.UUID, data: Busin
         changed_fields.append("PRIORITY")
 
     new_effective_from = data.effective_from if data.effective_from is not None else rule.effective_from
-    # Distinguish "not provided" from "explicitly set to null" so a manager
-    # can deliberately clear an expiry date.
     if "effective_until" in data.model_fields_set:
         new_effective_until = data.effective_until
     else:
@@ -339,7 +360,7 @@ def update_rule(db: Session, current_user: User, rule_id: uuid.UUID, data: Busin
         )
 
     if not changed_fields:
-        return rule  # nothing governance-relevant changed — no history/version bump
+        return rule
 
     rule.version += 1
     rule.updated_by = current_user.id
@@ -413,7 +434,7 @@ def list_rules(
 
 
 def get_history(db: Session, current_user: User, rule_id: uuid.UUID) -> list[BusinessRuleHistory]:
-    rule = get_rule_or_404(db, current_user, rule_id)  # also enforces read authorization
+    rule = get_rule_or_404(db, current_user, rule_id)
     return (
         db.query(BusinessRuleHistory)
         .filter(BusinessRuleHistory.business_rule_id == rule.id)
