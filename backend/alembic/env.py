@@ -20,6 +20,7 @@ from app.models import delivery  # noqa
 from app.models import inventory  # noqa
 from app.models import notification  # noqa
 from app.models import business_rule  # noqa
+from app.models import ai_log  # noqa
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url)

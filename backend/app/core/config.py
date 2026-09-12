@@ -19,6 +19,16 @@ class Settings(BaseSettings):
     # Phase 15: notifications
     email_mode: str = "DEMO"  # DEMO = never sends real email, always marks SENT instantly
 
+    # Phase 20: AI Platform — multiple free-tier keys/providers as a fallback
+    # chain, per the locked 20.1 architecture (provider fully behind the
+    # centralized AI Orchestration Service). Credentials only via environment,
+    # never hard-coded.
+    gemini_api_key_1: str | None = None
+    gemini_api_key_2: str | None = None
+    groq_api_key: str | None = None
+    ai_model_name_gemini: str = "gemini-2.0-flash"
+    ai_model_name_groq: str = "llama-3.3-70b-versatile"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
 
