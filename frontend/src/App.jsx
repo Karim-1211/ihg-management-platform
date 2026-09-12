@@ -1,5 +1,7 @@
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
 import { useAuth } from './context/AuthContext'
+import api from './services/api'
 import LoginPage from './pages/auth/LoginPage'
 import RegisterPage from './pages/auth/RegisterPage'
 import HotelsPage from './pages/hotels/HotelsPage'
@@ -35,19 +37,140 @@ import BusinessRulesPage from './pages/staff/BusinessRulesPage'
 import MyAccountPage from './pages/customer/MyAccountPage'
 import AppLayout from './components/layout/AppLayout'
 
+const SHADOW_REST = 'shadow-[0_1px_2px_rgba(15,23,42,0.04),0_2px_8px_-2px_rgba(15,23,42,0.06),0_16px_32px_-12px_rgba(15,23,42,0.10)]'
+
+function QuickAction({ label, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-sm font-semibold text-navy transition-colors hover:border-navy/30 hover:bg-slate-50"
+    >
+      {label} →
+    </button>
+  )
+}
+
 function HomePage() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const isCustomer = user?.role === 'CUSTOMER'
+
+  const [loading, setLoading] = useState(isCustomer)
+  const [currentStay, setCurrentStay] = useState(null)
+  const [activeOrders, setActiveOrders] = useState([])
+  const [outstandingInvoices, setOutstandingInvoices] = useState([])
+
+  useEffect(() => {
+    if (!isCustomer) return
+    Promise.all([
+      api.get('/bookings/my'),
+      api.get('/orders/my'),
+      api.get('/invoices/my'),
+      api.get('/restaurant-invoices/my'),
+    ])
+      .then(([bookings, orders, hotelInvoices, restaurantInvoices]) => {
+        const stay = bookings.data.find((b) => b.status === 'CHECKED_IN')
+          || bookings.data.find((b) => b.status === 'CONFIRMED')
+          || null
+        setCurrentStay(stay)
+
+        const active = orders.data.filter((o) => !['SERVED', 'CANCELLED'].includes(o.status))
+        setActiveOrders(active.slice(0, 3))
+
+        const unpaid = [
+          ...hotelInvoices.data.filter((i) => i.status !== 'PAID').map((i) => ({ ...i, kind: 'Hotel' })),
+          ...restaurantInvoices.data.filter((i) => i.status !== 'PAID').map((i) => ({ ...i, kind: 'Restaurant' })),
+        ]
+        setOutstandingInvoices(unpaid)
+      })
+      .finally(() => setLoading(false))
+  }, [isCustomer])
+
+  if (!isCustomer) {
+    return (
+      <AppLayout>
+        <div className="text-center py-12">
+          <h1 className="text-4xl font-bold text-navy mb-2">Welcome, {user?.first_name}</h1>
+          <p className="text-gray-500 mb-8">Role: {user?.role}</p>
+          <div className="flex gap-4 justify-center">
+            <button onClick={() => navigate('/hotels')} className="px-8 py-3 bg-navy text-white font-semibold rounded-lg hover:bg-navy-dark transition-colors">Browse Hotels</button>
+            <button onClick={() => navigate('/restaurants')} className="px-8 py-3 bg-red text-white font-semibold rounded-lg hover:bg-red-dark transition-colors">Dine With Us</button>
+          </div>
+        </div>
+      </AppLayout>
+    )
+  }
+
+  const totalOutstanding = outstandingInvoices.reduce((sum, i) => sum + Number(i.total_amount - (i.amount_paid || 0)), 0)
+
   return (
     <AppLayout>
-      <div className="text-center py-12">
-        <h1 className="text-4xl font-bold text-navy mb-2">Welcome, {user?.first_name}</h1>
-        <p className="text-gray-500 mb-8">Role: {user?.role}</p>
-        <div className="flex gap-4 justify-center">
-          <button onClick={() => navigate('/hotels')} className="px-8 py-3 bg-navy text-white font-semibold rounded-lg hover:bg-navy-dark transition-colors">Browse Hotels</button>
-          <button onClick={() => navigate('/restaurants')} className="px-8 py-3 bg-red text-white font-semibold rounded-lg hover:bg-red-dark transition-colors">Dine With Us</button>
+      <header className="relative -mx-4 sm:-mx-6 lg:-mx-8 -mt-6 lg:-mt-8 mb-8 overflow-hidden bg-gradient-to-br from-[#1F3A5F] to-[#132840]">
+        <div className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-white/[0.05] blur-3xl" />
+        <div className="relative px-4 py-10 sm:px-6 lg:px-8">
+          <h1 className="text-[36px] font-extrabold leading-[1.05] tracking-[-0.02em] text-white sm:text-[40px]">
+            Welcome back, {user?.first_name}
+          </h1>
+          <p className="mt-2 max-w-xl text-[14px] font-normal leading-6 text-white/50">
+            Here's what's happening with your stays and orders right now.
+          </p>
         </div>
-      </div>
+      </header>
+
+      {loading && <p className="text-gray-500">Loading...</p>}
+
+      {!loading && (
+        <div className="space-y-6">
+          {currentStay && (
+            <div className={`rounded-2xl border border-slate-200/80 bg-white p-5 ${SHADOW_REST}`}>
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400 mb-2">
+                {currentStay.status === 'CHECKED_IN' ? 'Current Stay' : 'Upcoming Booking'}
+              </p>
+              <p className="text-lg font-bold text-navy">{currentStay.booking_reference}</p>
+              <p className="text-sm text-slate-500">
+                {currentStay.check_in_date} → {currentStay.check_out_date} · {currentStay.number_of_guests} guest(s)
+              </p>
+            </div>
+          )}
+
+          {activeOrders.length > 0 && (
+            <div className={`rounded-2xl border border-slate-200/80 bg-white p-5 ${SHADOW_REST}`}>
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400 mb-3">Active Orders</p>
+              <div className="space-y-2">
+                {activeOrders.map((o) => (
+                  <div key={o.id} className="flex items-center justify-between text-sm">
+                    <span className="font-medium text-navy">{o.order_number}</span>
+                    <span className="text-slate-500">{o.status.replace('_', ' ')}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {outstandingInvoices.length > 0 && (
+            <div className={`rounded-2xl border border-amber-200 bg-amber-50/60 p-5`}>
+              <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-amber-700 mb-2">Outstanding Payment</p>
+              <p className="text-lg font-bold text-navy">${totalOutstanding.toFixed(2)}</p>
+              <p className="text-sm text-slate-500">{outstandingInvoices.length} invoice(s) awaiting payment</p>
+            </div>
+          )}
+
+          {!currentStay && activeOrders.length === 0 && outstandingInvoices.length === 0 && (
+            <div className={`rounded-2xl border border-slate-200/80 bg-white p-8 text-center ${SHADOW_REST}`}>
+              <p className="text-sm text-slate-400">Nothing needs your attention right now.</p>
+            </div>
+          )}
+
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400 mb-3">Quick Actions</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <QuickAction label="Browse Hotels" onClick={() => navigate('/hotels')} />
+              <QuickAction label="Dine With Us" onClick={() => navigate('/restaurants')} />
+              <QuickAction label="My Account" onClick={() => navigate('/my-account')} />
+            </div>
+          </div>
+        </div>
+      )}
     </AppLayout>
   )
 }
@@ -86,7 +209,7 @@ function App() {
       <Route path="/my-orders" element={<ProtectedRoute><MyOrdersPage /></ProtectedRoute>} />
       <Route path="/my-reservations" element={<ProtectedRoute><MyReservationsPage /></ProtectedRoute>} />
       <Route path="/my-restaurant-invoices" element={<ProtectedRoute><MyRestaurantInvoicesPage /></ProtectedRoute>} />
-      <Route path="/my-account" element={<ProtectedRoute><MyAccountPage /></ProtectedRoute>} />
+      <Route path="/my-account" element={<ProtectedRoute allowedRoles={['CUSTOMER']}><MyAccountPage /></ProtectedRoute>} />
       <Route path="/staff/bookings" element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST']}><StaffBookingsPage /></ProtectedRoute>} />
       <Route path="/staff/housekeeping" element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'MANAGER', 'HOUSEKEEPING']}><HousekeepingPage /></ProtectedRoute>} />
       <Route path="/staff/service-requests" element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST', 'HOUSEKEEPING']}><ServiceRequestsPage /></ProtectedRoute>} />
