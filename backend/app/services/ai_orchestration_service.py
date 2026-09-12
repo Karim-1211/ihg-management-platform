@@ -46,8 +46,16 @@ def _log_interaction(
 
 
 def _is_quota_or_rate_error(e: Exception) -> bool:
+    """Errors here trigger falling through to the next provider in the
+    chain, rather than stopping immediately. Includes genuine quota/rate
+    limits, and also provider-side account/project restrictions (like
+    Gemini's 'denied access' 403) that make a specific provider unusable
+    right now but aren't a bug in our own request."""
     text = str(e).lower()
-    return any(term in text for term in ["quota", "rate limit", "429", "resource_exhausted", "rate_limit_exceeded"])
+    return any(term in text for term in [
+        "quota", "rate limit", "429", "resource_exhausted", "rate_limit_exceeded",
+        "permission_denied", "denied access", "403",
+    ])
 
 
 # ---------- Gemini adapter ----------
@@ -165,6 +173,7 @@ def run_customer_assistant(
 
     if not attempts:
         _log_interaction(db, current_user, prompt_summary, [], None, "UNAVAILABLE", "none")
+        print("[DEBUG] No provider keys configured at all — settings.gemini_api_key_1/2/groq_api_key are all falsy.")
         return "The assistant isn't available right now. Please use the My Account page, or contact staff for help.", []
 
     last_error = None
@@ -175,8 +184,9 @@ def run_customer_assistant(
             return reply, tools_called
         except Exception as e:
             last_error = e
+            print(f"[DEBUG] {label} failed: {type(e).__name__}: {e}")
             if _is_quota_or_rate_error(e):
-                continue  # try the next provider in the chain
+                continue
             _log_interaction(db, current_user, prompt_summary, [], None, "FAILED", label, str(e))
             return "The assistant is temporarily unavailable. Please try again shortly, or use My Account directly.", []
 

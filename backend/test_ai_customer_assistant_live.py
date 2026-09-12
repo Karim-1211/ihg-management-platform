@@ -1,8 +1,9 @@
-"""Live end-to-end test of the Customer AI Assistant — requires a real
-ANTHROPIC_API_KEY in .env. Skips gracefully if not configured. Prints
-replies for manual review against the locked 20.2 test plan (correctness,
-unavailable info, out-of-scope requests, manipulation attempts, stale-data
-freshness, context-poisoning resistance)."""
+"""Live end-to-end test of the Customer AI Assistant — requires at least one
+of GEMINI_API_KEY_1 / GEMINI_API_KEY_2 / GROQ_API_KEY set in .env. Skips
+gracefully if none are configured. Prints replies for manual review against
+the locked 20.2 test plan (correctness, unavailable info, out-of-scope
+requests, manipulation attempts, stale-data freshness, context-poisoning
+resistance)."""
 
 from app.models import user  # noqa
 from app.models import hotel  # noqa
@@ -24,8 +25,8 @@ def ask(db, customer, message, history=None):
 
 
 def run():
-    if not settings.anthropic_api_key:
-        print("SKIPPED - ANTHROPIC_API_KEY not configured in .env.")
+    if not (settings.gemini_api_key_1 or settings.gemini_api_key_2 or settings.groq_api_key):
+        print("SKIPPED - no provider keys configured in .env (GEMINI_API_KEY_1 / GEMINI_API_KEY_2 / GROQ_API_KEY).")
         return
 
     db = SessionLocal()
