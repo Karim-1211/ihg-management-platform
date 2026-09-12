@@ -390,7 +390,16 @@ function ServiceRequestsTab({ myRequests }) {
 
 // ---------- Notifications tab (persistent history, paginated) ----------
 
-function NotificationsTab() {
+const NOTIFICATION_TAB_MAP = {
+  booking: 'bookings',
+  service_request: 'service-requests',
+  order: 'orders',
+  delivery: 'orders',
+  invoice: 'invoices',
+  payment: 'invoices',
+}
+
+function NotificationsTab({ onNavigateToTab }) {
   const [notifications, setNotifications] = useState([])
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(0)
@@ -415,6 +424,15 @@ function NotificationsTab() {
     loadPage(next)
   }
 
+    async function handleNotificationClick(n) {
+    if (n.status !== 'READ') {
+      api.patch(`/notifications/${n.id}/read`).catch(() => {})
+      setNotifications((prev) => prev.map((item) => (item.id === n.id ? { ...item, status: 'READ' } : item)))
+    }
+    const targetTab = NOTIFICATION_TAB_MAP[n.related_entity_type]
+    if (targetTab && onNavigateToTab) onNavigateToTab(targetTab)
+  }
+
   if (loading && notifications.length === 0) return <p className="text-gray-500">Loading...</p>
   if (!loading && notifications.length === 0) return <EmptyState text="No notifications yet." />
 
@@ -422,14 +440,14 @@ function NotificationsTab() {
     <div className="space-y-2">
       {notifications.map((n) => (
         <Card key={n.id}>
-          <div className="flex items-start justify-between gap-3">
+          <button type="button" onClick={() => handleNotificationClick(n)} className="flex w-full items-start justify-between gap-3 text-left">
             <div>
               <p className={`text-sm ${n.status !== 'READ' ? 'font-bold text-navy' : 'font-medium text-gray-600'}`}>{n.title}</p>
               <p className="text-sm text-gray-500 mt-0.5">{n.message}</p>
               <p className="text-xs text-gray-400 mt-1">{new Date(n.created_at).toLocaleString()}</p>
             </div>
             {n.status !== 'READ' && <span className="w-2 h-2 rounded-full bg-red shrink-0 mt-1.5" />}
-          </div>
+          </button>
         </Card>
       ))}
       {hasMore && (
@@ -542,7 +560,7 @@ export default function MyAccountPage() {
           {activeTab === 'reservations' && <ReservationsTab reservations={reservations} onCancel={loadAll} />}
           {activeTab === 'invoices' && <InvoicesTab hotelInvoices={hotelInvoices} restaurantInvoices={restaurantInvoices} onPaid={loadAll} />}
           {activeTab === 'service-requests' && <ServiceRequestsTab myRequests={myRequests} />}
-          {activeTab === 'notifications' && <NotificationsTab />}
+          {activeTab === 'notifications' && <NotificationsTab onNavigateToTab={setActiveTab} />}
         </>
       )}
     </AppLayout>

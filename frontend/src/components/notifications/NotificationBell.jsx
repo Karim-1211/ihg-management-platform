@@ -11,12 +11,12 @@ function BellIcon() {
 }
 
 const ENTITY_ROUTES = {
-  booking: '/my-bookings',
-  service_request: '/my-bookings',
-  order: '/my-orders',
-  delivery: '/my-deliveries',
-  invoice: '/my-invoices',
-  payment: '/my-invoices',
+  booking: '/my-account?tab=bookings',
+  service_request: '/my-account?tab=service-requests',
+  order: '/my-account?tab=orders',
+  delivery: '/my-account?tab=orders',
+  invoice: '/my-account?tab=invoices',
+  payment: '/my-account?tab=invoices',
   stock_transaction: '/staff/inventory',
 }
 
