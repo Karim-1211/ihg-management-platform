@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import api from '../../services/api'
 import AppLayout from '../../components/layout/AppLayout'
 
@@ -442,8 +443,14 @@ function NotificationsTab() {
 
 // ---------- Main page ----------
 
+const VALID_TAB_KEYS = TABS.map((t) => t.key)
+
 export default function MyAccountPage() {
-  const [activeTab, setActiveTab] = useState('bookings')
+  const [searchParams] = useSearchParams()
+  const requestedTab = searchParams.get('tab')
+  const initialTab = VALID_TAB_KEYS.includes(requestedTab) ? requestedTab : 'bookings'
+
+  const [activeTab, setActiveTab] = useState(initialTab)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 

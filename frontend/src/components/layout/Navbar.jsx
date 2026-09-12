@@ -77,6 +77,24 @@ function DeliveryIcon() {
   )
 }
 
+function AccountIcon() {
+  return (
+    <svg
+      className="w-4 h-4"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth="1.8"
+    >
+      <path
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        d="M20 21a8 8 0 1 0-16 0M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z"
+      />
+    </svg>
+  )
+}
+
 function LogoutIcon() {
   return (
     <svg
@@ -301,17 +319,22 @@ export default function Navbar() {
     setMobileOpen(false)
   }, [location.pathname])
 
+  // Phase 19.3: "My Orders" removed from both Restaurant and Delivery
+  // dropdowns (was duplicated in both, per the 19.1 finding). "My Bookings",
+  // "My Invoices", "My Reservations", and "My Bills" links now point into
+  // the correct tab of the unified /my-account page instead of their own
+  // separate legacy pages.
   const hotelItems = [
     {
       to: '/hotels',
       label: 'Browse Hotels',
     },
     {
-      to: '/my-bookings',
+      to: '/my-account?tab=bookings',
       label: 'My Bookings',
     },
     {
-      to: '/my-invoices',
+      to: '/my-account?tab=invoices',
       label: 'My Invoices',
     },
   ]
@@ -321,26 +344,14 @@ export default function Navbar() {
       label: 'Restaurants',
     },
     {
-      to: '/my-orders',
-      label: 'My Orders',
-    },
-    {
-      to: '/my-reservations',
+      to: '/my-account?tab=reservations',
       label: 'My Reservations',
-    },
-    {
-      to: '/my-restaurant-invoices',
-      label: 'My Bills',
     },
   ]
   const deliveryItems = [
     {
       to: '/restaurants',
       label: 'Order Food',
-    },
-    {
-      to: '/my-orders',
-      label: 'My Delivery Orders',
     },
   ]
 
@@ -435,6 +446,27 @@ export default function Navbar() {
                 setAccountOpen(null)
               }}
             />
+            <Link
+              to="/my-account"
+              className={`
+                inline-flex items-center gap-2
+                h-10
+                px-3.5
+                rounded-lg
+                text-sm font-medium
+                cursor-pointer
+                select-none
+                transition-all duration-200
+                ${
+                  location.pathname === '/my-account'
+                    ? 'bg-gray-100 text-navy'
+                    : 'text-gray-600 hover:bg-gray-50 hover:text-navy'
+                }
+              `}
+            >
+              <AccountIcon />
+              <span>My Activity</span>
+            </Link>
           </div>
 
           <div className="hidden md:flex items-center gap-2">
@@ -499,6 +531,30 @@ export default function Navbar() {
                       {email}
                     </p>
                   </div>
+                  <Link
+                    to="/my-account"
+                    role="menuitem"
+                    onClick={() => setAccountOpen(false)}
+                    className="
+                      flex
+                      items-center
+                      justify-between
+                      px-4
+                      py-3
+                      mt-1
+                      text-left
+                      text-sm
+                      font-medium
+                      text-gray-700
+                      hover:bg-gray-50
+                      hover:text-navy
+                      cursor-pointer
+                      transition-colors
+                    "
+                  >
+                    <span>My Account</span>
+                    <AccountIcon />
+                  </Link>
                   <button
                     type="button"
                     role="menuitem"
@@ -510,7 +566,6 @@ export default function Navbar() {
                       justify-between
                       px-4
                       py-3
-                      mt-1
                       text-left
                       text-sm
                       font-medium
@@ -614,6 +669,12 @@ export default function Navbar() {
               label="Delivery"
               icon={<DeliveryIcon />}
               items={deliveryItems}
+              onClose={() => setMobileOpen(false)}
+            />
+            <MobileSection
+              label="My Activity"
+              icon={<AccountIcon />}
+              items={[{ to: '/my-account', label: 'My Account' }]}
               onClose={() => setMobileOpen(false)}
             />
             <div className="pt-3 mt-3 border-t border-gray-100">
