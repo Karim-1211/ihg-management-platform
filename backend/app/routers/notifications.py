@@ -21,10 +21,12 @@ router = APIRouter(prefix="/api/v1/notifications", tags=["Notifications"])
 @router.get("", response_model=list[NotificationResponse])
 def list_my_notifications(
     unread_only: bool = False,
+    limit: int = 50,
+    offset: int = 0,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return notification_service.list_notifications(db, current_user.id, unread_only)
+    return notification_service.list_notifications(db, current_user.id, unread_only, limit, offset)
 
 
 @router.get("/unread-count", response_model=UnreadCountResponse)

@@ -186,14 +186,20 @@ def dispatch(db: Session, event: NotificationEvent) -> None:
 
 # ---------- Notification Center API-facing functions ----------
 
-def list_notifications(db: Session, user_id: uuid.UUID, unread_only: bool = False, limit: int = 50) -> list[Notification]:
+def list_notifications(
+    db: Session, user_id: uuid.UUID, unread_only: bool = False, limit: int = 50, offset: int = 0
+) -> list[Notification]:
+    """Phase 19.2: added optional offset for pagination, so a full-page
+    history view (not just the bell dropdown's recent-N) can page through
+    a customer's entire notification history. Existing callers that don't
+    pass offset are unaffected (defaults to 0, identical to prior behavior)."""
     query = db.query(Notification).filter(
         Notification.recipient_user_id == user_id,
         Notification.channel == NotificationChannel.IN_APP,
     )
     if unread_only:
         query = query.filter(Notification.status != NotificationStatus.READ)
-    return query.order_by(Notification.created_at.desc()).limit(limit).all()
+    return query.order_by(Notification.created_at.desc()).offset(offset).limit(limit).all()
 
 
 def get_unread_count(db: Session, user_id: uuid.UUID) -> int:

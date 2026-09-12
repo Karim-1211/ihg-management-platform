@@ -32,6 +32,7 @@ import EmailLogPage from './pages/staff/EmailLogPage'
 import DashboardPage from './pages/staff/DashboardPage'
 import ReportsPage from './pages/staff/ReportsPage'
 import BusinessRulesPage from './pages/staff/BusinessRulesPage'
+import MyAccountPage from './pages/customer/MyAccountPage'
 import AppLayout from './components/layout/AppLayout'
 
 function HomePage() {
@@ -85,6 +86,7 @@ function App() {
       <Route path="/my-orders" element={<ProtectedRoute><MyOrdersPage /></ProtectedRoute>} />
       <Route path="/my-reservations" element={<ProtectedRoute><MyReservationsPage /></ProtectedRoute>} />
       <Route path="/my-restaurant-invoices" element={<ProtectedRoute><MyRestaurantInvoicesPage /></ProtectedRoute>} />
+      <Route path="/my-account" element={<ProtectedRoute><MyAccountPage /></ProtectedRoute>} />
       <Route path="/staff/bookings" element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST']}><StaffBookingsPage /></ProtectedRoute>} />
       <Route path="/staff/housekeeping" element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'MANAGER', 'HOUSEKEEPING']}><HousekeepingPage /></ProtectedRoute>} />
       <Route path="/staff/service-requests" element={<ProtectedRoute allowedRoles={['SUPER_ADMIN', 'MANAGER', 'RECEPTIONIST', 'HOUSEKEEPING']}><ServiceRequestsPage /></ProtectedRoute>} />

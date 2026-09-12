@@ -179,11 +179,20 @@ class OrderResponse(BaseModel):
     status: OrderStatus
     subtotal: float
     tax_amount: float
+    service_charge_amount: float
     discount_amount: float
     total_amount: float
     created_at: datetime
     items: list[OrderItemResponse] = []
     table_number: str | None = None
+
+    # Phase 19.2: read-only delivery enrichment (only populated for
+    # DELIVERY-type orders; None for DINE_IN/ROOM_SERVICE).
+    delivery_status: str | None = None
+    delivery_driver_name: str | None = None
+    delivery_assigned_at: datetime | None = None
+    delivery_picked_up_at: datetime | None = None
+    delivery_delivered_at: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

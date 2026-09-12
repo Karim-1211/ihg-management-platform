@@ -109,6 +109,30 @@ def _attach_display_fields(db: Session, order: Order) -> Order:
         table = db.query(RestaurantTable).filter(RestaurantTable.id == order.table_id).first()
         if table:
             order.table_number = table.table_number
+
+    # Phase 19.2: read-only enrichment for DELIVERY orders — attaches
+    # already-existing Delivery data (Phase 12) so customers can see
+    # delivery progress. No new workflow logic, no change to Delivery
+    # itself; this is purely a display-layer addition to an order listing.
+    order.delivery_status = None
+    order.delivery_driver_name = None
+    order.delivery_assigned_at = None
+    order.delivery_picked_up_at = None
+    order.delivery_out_for_delivery_at = None
+    order.delivery_delivered_at = None
+    if order.order_type == OrderType.DELIVERY:
+        from app.models.delivery import Delivery
+        delivery = db.query(Delivery).filter(Delivery.order_id == order.id).first()
+        if delivery:
+            order.delivery_status = delivery.status.value
+            order.delivery_assigned_at = delivery.assigned_at
+            order.delivery_picked_up_at = delivery.picked_up_at
+            order.delivery_delivered_at = delivery.delivered_at
+            if delivery.delivery_staff_id:
+                driver = db.query(User).filter(User.id == delivery.delivery_staff_id).first()
+                if driver:
+                    order.delivery_driver_name = f"{driver.first_name} {driver.last_name}"
+
     return order
 
 
