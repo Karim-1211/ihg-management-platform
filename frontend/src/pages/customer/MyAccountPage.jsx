@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import api from '../../services/api'
 import AppLayout from '../../components/layout/AppLayout'
+import ConfirmDialog from '../../components/shared/ConfirmDialog'
 
 const SHADOW_REST = 'shadow-[0_1px_2px_rgba(15,23,42,0.04),0_2px_8px_-2px_rgba(15,23,42,0.06),0_16px_32px_-12px_rgba(15,23,42,0.10)]'
 
@@ -206,6 +207,24 @@ function ServiceRequestForm({ bookingId, onSubmitted }) {
 
 function BookingsTab({ bookings, myRequests, onDataChange }) {
   const [openFormFor, setOpenFormFor] = useState(null)
+  const [pendingCancel, setPendingCancel] = useState(null)
+  const [cancelling, setCancelling] = useState(false)
+  const [cancelError, setCancelError] = useState('')
+
+  async function handleConfirmCancel() {
+    if (!pendingCancel) return
+    setCancelling(true)
+    setCancelError('')
+    try {
+      await api.post(`/bookings/${pendingCancel.id}/cancel`)
+      setPendingCancel(null)
+      onDataChange()
+    } catch (err) {
+      setCancelError(err.response?.data?.detail || 'Could not cancel this booking.')
+    } finally {
+      setCancelling(false)
+    }
+  }
 
   function requestsForBooking(bookingId) {
     return myRequests.filter((r) => r.booking_id === bookingId)
@@ -228,6 +247,14 @@ function BookingsTab({ bookings, myRequests, onDataChange }) {
               {b.status === 'CHECKED_IN' && (
                 <button onClick={() => setOpenFormFor(openFormFor === b.id ? null : b.id)} className="px-4 py-1.5 bg-red text-white text-xs font-semibold rounded-lg hover:bg-red-dark transition-colors">
                   Request Service
+                </button>
+              )}
+              {(b.status === 'CONFIRMED' || b.status === 'CHECKED_IN') && (
+                <button
+                  onClick={() => { setCancelError(''); setPendingCancel(b) }}
+                  className="px-4 py-1.5 border border-red text-red text-xs font-semibold rounded-lg hover:bg-red-50 transition-colors"
+                >
+                  Cancel Booking
                 </button>
               )}
             </div>
@@ -253,6 +280,22 @@ function BookingsTab({ bookings, myRequests, onDataChange }) {
           )}
         </Card>
       ))}
+
+      {cancelError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+          {cancelError}
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={!!pendingCancel}
+        title="Cancel this booking?"
+        message={pendingCancel ? `This will cancel booking ${pendingCancel.booking_reference}. This cannot be undone, and is subject to the cancellation policy.` : ''}
+        confirmLabel={cancelling ? 'Cancelling...' : 'Cancel Booking'}
+        destructive
+        onConfirm={handleConfirmCancel}
+        onCancel={() => setPendingCancel(null)}
+      />
     </div>
   )
 }
@@ -308,12 +351,19 @@ function OrdersTab({ orders }) {
 
 function ReservationsTab({ reservations, onCancel }) {
   const [cancelingId, setCancelingId] = useState(null)
+  const [pendingCancel, setPendingCancel] = useState(null)
+  const [cancelError, setCancelError] = useState('')
 
-  async function handleCancel(id) {
-    setCancelingId(id)
+  async function handleConfirmCancel() {
+    if (!pendingCancel) return
+    setCancelingId(pendingCancel.id)
+    setCancelError('')
     try {
-      await api.post(`/reservations/${id}/cancel`)
+      await api.post(`/reservations/${pendingCancel.id}/cancel`)
+      setPendingCancel(null)
       onCancel()
+    } catch (err) {
+      setCancelError(err.response?.data?.detail || 'Could not cancel this reservation.')
     } finally {
       setCancelingId(null)
     }
@@ -333,7 +383,11 @@ function ReservationsTab({ reservations, onCancel }) {
             <div className="flex items-center gap-3">
               <StatusBadge label={r.status} colorMap={RESERVATION_STATUS_COLORS} />
               {r.status === 'CONFIRMED' && (
-                <button onClick={() => handleCancel(r.id)} disabled={cancelingId === r.id} className="px-3 py-1.5 bg-red text-white text-xs font-semibold rounded-lg hover:bg-red-dark transition-colors disabled:opacity-50">
+                <button
+                  onClick={() => { setCancelError(''); setPendingCancel(r) }}
+                  disabled={cancelingId === r.id}
+                  className="px-3 py-1.5 bg-red text-white text-xs font-semibold rounded-lg hover:bg-red-dark transition-colors disabled:opacity-50"
+                >
                   Cancel
                 </button>
               )}
@@ -341,6 +395,22 @@ function ReservationsTab({ reservations, onCancel }) {
           </div>
         </Card>
       ))}
+
+      {cancelError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+          {cancelError}
+        </div>
+      )}
+
+      <ConfirmDialog
+        open={!!pendingCancel}
+        title="Cancel this reservation?"
+        message={pendingCancel ? `This will cancel your table reservation at ${pendingCancel.restaurant_name} (Table ${pendingCancel.table_number}, ${new Date(pendingCancel.reservation_start).toLocaleString()}). This cannot be undone.` : ''}
+        confirmLabel={cancelingId ? 'Cancelling...' : 'Cancel Reservation'}
+        destructive
+        onConfirm={handleConfirmCancel}
+        onCancel={() => setPendingCancel(null)}
+      />
     </div>
   )
 }

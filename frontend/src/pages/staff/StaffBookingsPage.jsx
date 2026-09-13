@@ -79,6 +79,7 @@ export default function StaffBookingsPage() {
   const [error, setError] = useState('')
   const [actioningId, setActioningId] = useState(null)
   const [pendingAction, setPendingAction] = useState(null) // { booking, actionKey }
+  const [searchTerm, setSearchTerm] = useState('')
 
   function loadBookings() {
     setLoading(true)
@@ -115,10 +116,24 @@ export default function StaffBookingsPage() {
 
   const activeConfig = pendingAction ? ACTION_CONFIG[pendingAction.actionKey] : null
 
+  const filteredBookings = searchTerm.trim()
+    ? bookings.filter((b) => b.booking_reference.toLowerCase().includes(searchTerm.trim().toLowerCase()))
+    : bookings
+
   return (
     <AppLayout>
       <h1 className="text-2xl font-bold text-navy mb-2">All Bookings</h1>
       <p className="text-gray-500 mb-6">Manage check-ins and check-outs</p>
+
+      <div className="mb-6">
+        <input
+          type="text"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          placeholder="Search by booking reference..."
+          className="w-full max-w-sm px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-navy"
+        />
+      </div>
 
       {error && (
         <div className="mb-4 px-4 py-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg">
@@ -128,10 +143,13 @@ export default function StaffBookingsPage() {
 
       {loading && <p className="text-gray-500">Loading...</p>}
       {!loading && bookings.length === 0 && <p className="text-gray-500">No bookings yet.</p>}
+      {!loading && bookings.length > 0 && filteredBookings.length === 0 && (
+        <p className="text-gray-500">No bookings match "{searchTerm}".</p>
+      )}
 
       {/* Mobile: stacked cards (below sm breakpoint) */}
       <div className="sm:hidden space-y-4">
-        {bookings.map((b) => (
+        {filteredBookings.map((b) => (
           <div key={b.id} className="bg-white rounded-2xl shadow-md p-5">
             <div className="flex items-center justify-between mb-2">
               <p className="font-bold text-navy">{b.booking_reference}</p>
@@ -161,7 +179,7 @@ export default function StaffBookingsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {bookings.map((b) => (
+              {filteredBookings.map((b) => (
                 <tr key={b.id}>
                   <td className="px-5 py-4 font-medium text-navy">{b.booking_reference}</td>
                   <td className="px-5 py-4 text-gray-600 whitespace-nowrap">{b.check_in_date} → {b.check_out_date}</td>
