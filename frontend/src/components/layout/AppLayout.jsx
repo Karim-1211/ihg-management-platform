@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import Navbar from './Navbar'
 import Sidebar from './Sidebar'
+import CustomerAssistantWidget from '../ai/CustomerAssistantWidget'
 
 const STAFF_ROLES = [
   'SUPER_ADMIN',
@@ -101,6 +102,8 @@ export default function AppLayout({ children }) {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {children}
       </main>
+
+      {user?.role === 'CUSTOMER' && <CustomerAssistantWidget />}
     </div>
   )
 }
