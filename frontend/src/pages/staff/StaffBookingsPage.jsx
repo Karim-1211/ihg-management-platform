@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import api from '../../services/api'
 import AppLayout from '../../components/layout/AppLayout'
+import ConfirmDialog from '../../components/shared/ConfirmDialog'
 
 const STATUS_COLORS = {
   PENDING: 'bg-yellow-100 text-yellow-700',
@@ -10,30 +11,66 @@ const STATUS_COLORS = {
   CANCELLED: 'bg-red-100 text-red-700',
 }
 
-function ActionButton({ booking, actioningId, onAction }) {
-  if (booking.status === 'CONFIRMED') {
-    return (
-      <button
-        onClick={() => onAction(booking.id, 'check-in')}
-        disabled={actioningId === booking.id}
-        className="px-3 py-1.5 bg-navy text-white text-xs font-semibold rounded-lg hover:bg-navy-dark transition-colors disabled:opacity-50"
-      >
-        Check In
-      </button>
-    )
-  }
-  if (booking.status === 'CHECKED_IN') {
-    return (
-      <button
-        onClick={() => onAction(booking.id, 'check-out')}
-        disabled={actioningId === booking.id}
-        className="px-3 py-1.5 bg-red text-white text-xs font-semibold rounded-lg hover:bg-red-dark transition-colors disabled:opacity-50"
-      >
-        Check Out
-      </button>
-    )
-  }
-  return <span className="text-gray-400 text-xs">—</span>
+function ActionButtons({ booking, actioningId, onRequestAction }) {
+  const canCancel = booking.status === 'CONFIRMED' || booking.status === 'CHECKED_IN'
+  return (
+    <div className="flex flex-wrap gap-2">
+      {booking.status === 'CONFIRMED' && (
+        <button
+          onClick={() => onRequestAction(booking, 'check-in')}
+          disabled={actioningId === booking.id}
+          className="px-3 py-1.5 bg-navy text-white text-xs font-semibold rounded-lg hover:bg-navy-dark transition-colors disabled:opacity-50"
+        >
+          Check In
+        </button>
+      )}
+      {booking.status === 'CHECKED_IN' && (
+        <button
+          onClick={() => onRequestAction(booking, 'check-out')}
+          disabled={actioningId === booking.id}
+          className="px-3 py-1.5 bg-red text-white text-xs font-semibold rounded-lg hover:bg-red-dark transition-colors disabled:opacity-50"
+        >
+          Check Out
+        </button>
+      )}
+      {canCancel && (
+        <button
+          onClick={() => onRequestAction(booking, 'cancel')}
+          disabled={actioningId === booking.id}
+          className="px-3 py-1.5 border border-red text-red text-xs font-semibold rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      )}
+      {!canCancel && booking.status !== 'CONFIRMED' && booking.status !== 'CHECKED_IN' && (
+        <span className="text-gray-400 text-xs">—</span>
+      )}
+    </div>
+  )
+}
+
+const ACTION_CONFIG = {
+  'check-in': {
+    endpoint: 'check-in',
+    title: 'Check in this guest?',
+    message: (b) => `This will check in booking ${b.booking_reference} and mark the room as occupied.`,
+    confirmLabel: 'Check In',
+    destructive: false,
+  },
+  'check-out': {
+    endpoint: 'check-out',
+    title: 'Check out this guest?',
+    message: (b) => `This will check out booking ${b.booking_reference}, generate the final invoice, and send the room to housekeeping.`,
+    confirmLabel: 'Check Out',
+    destructive: false,
+  },
+  'cancel': {
+    endpoint: 'cancel',
+    title: 'Cancel this booking?',
+    message: (b) => `This will cancel booking ${b.booking_reference}. This cannot be undone, and is subject to the cancellation policy.`,
+    confirmLabel: 'Cancel Booking',
+    destructive: true,
+  },
 }
 
 export default function StaffBookingsPage() {
@@ -41,6 +78,7 @@ export default function StaffBookingsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [actioningId, setActioningId] = useState(null)
+  const [pendingAction, setPendingAction] = useState(null) // { booking, actionKey }
 
   function loadBookings() {
     setLoading(true)
@@ -54,18 +92,28 @@ export default function StaffBookingsPage() {
     loadBookings()
   }, [])
 
-  async function handleAction(bookingId, action) {
+  function handleRequestAction(booking, actionKey) {
+    setPendingAction({ booking, actionKey })
+  }
+
+  async function handleConfirm() {
+    if (!pendingAction) return
+    const { booking, actionKey } = pendingAction
+    const config = ACTION_CONFIG[actionKey]
     setError('')
-    setActioningId(bookingId)
+    setActioningId(booking.id)
+    setPendingAction(null)
     try {
-      await api.post(`/bookings/${bookingId}/${action}`)
+      await api.post(`/bookings/${booking.id}/${config.endpoint}`)
       loadBookings()
     } catch (err) {
-      setError(err.response?.data?.detail || `Failed to ${action}.`)
+      setError(err.response?.data?.detail || `Failed to ${actionKey}.`)
     } finally {
       setActioningId(null)
     }
   }
+
+  const activeConfig = pendingAction ? ACTION_CONFIG[pendingAction.actionKey] : null
 
   return (
     <AppLayout>
@@ -93,7 +141,7 @@ export default function StaffBookingsPage() {
             </div>
             <p className="text-gray-600 text-sm">{b.check_in_date} → {b.check_out_date}</p>
             <p className="text-gray-600 text-sm mb-3">{b.number_of_guests} guest(s) · ${b.total_amount}</p>
-            <ActionButton booking={b} actioningId={actioningId} onAction={handleAction} />
+            <ActionButtons booking={b} actioningId={actioningId} onRequestAction={handleRequestAction} />
           </div>
         ))}
       </div>
@@ -125,7 +173,7 @@ export default function StaffBookingsPage() {
                     </span>
                   </td>
                   <td className="px-5 py-4">
-                    <ActionButton booking={b} actioningId={actioningId} onAction={handleAction} />
+                    <ActionButtons booking={b} actioningId={actioningId} onRequestAction={handleRequestAction} />
                   </td>
                 </tr>
               ))}
@@ -133,6 +181,16 @@ export default function StaffBookingsPage() {
           </table>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={!!pendingAction}
+        title={activeConfig?.title}
+        message={pendingAction ? activeConfig.message(pendingAction.booking) : ''}
+        confirmLabel={activeConfig?.confirmLabel}
+        destructive={activeConfig?.destructive}
+        onConfirm={handleConfirm}
+        onCancel={() => setPendingAction(null)}
+      />
     </AppLayout>
   )
 }
