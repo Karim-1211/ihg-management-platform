@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext'
 import Navbar from './Navbar'
 import Sidebar from './Sidebar'
 import CustomerAssistantWidget from '../ai/CustomerAssistantWidget'
+import StaffAssistantWidget from '../ai/StaffAssistantWidget'
 
 const STAFF_ROLES = [
   'SUPER_ADMIN',
@@ -91,6 +92,8 @@ export default function AppLayout({ children }) {
           </main>
 
         </div>
+
+        <StaffAssistantWidget />
       </div>
     )
   }

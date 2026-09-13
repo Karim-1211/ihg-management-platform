@@ -1,14 +1,17 @@
-"""Phase 20.2 — the single centralized AI Orchestration Service, per the
-locked 20.1 architecture. Owns all provider API calls, the tool-execution
-loop, and interaction logging. No other module calls a provider SDK
-directly — if the provider chain ever changes, only this file changes.
+"""Phase 20.1-20.6 — the single centralized AI Orchestration Service. Owns
+all provider API calls, the tool-execution loop, and interaction logging.
+No other module calls a provider SDK directly. Shared by the Customer
+assistant (20.2/20.3) and the Staff/Manager assistant (20.4/20.5/20.6) via
+the same generic runner — only the system prompt, tool set, and dispatch
+function differ per assistant type.
 
-Fallback chain (each step tried only on quota/rate-limit errors, not on
-genuine tool/logic errors, which are raised immediately):
+Fallback chain (each step tried only on quota/rate-limit/permission
+errors, not on genuine tool/logic errors, which are raised immediately):
   Gemini key 1 -> Gemini key 2 -> Groq -> graceful "unavailable" message.
 """
 
 import json
+from typing import Callable
 
 from google import genai
 from google.genai import types as genai_types
@@ -19,23 +22,24 @@ from app.core.config import settings
 from app.models.ai_log import AIInteractionLog
 from app.models.user import User
 from app.schemas.ai import AIChatMessage
-from app.services import ai_constants
+from app.services import ai_constants, ai_staff_constants
 from app.services.ai_tool_registry import TOOL_DEFINITIONS, dispatch_tool
+from app.services.ai_staff_tool_registry import get_tool_definitions_for_role, dispatch_staff_tool
 
 
 def _log_interaction(
-    db: Session, current_user: User, prompt_summary: str, tools_called: list[str],
+    db: Session, current_user: User, assistant_type: str, prompt_summary: str, tools_called: list[str],
     token_usage: int | None, status: str, model_used: str, error_message: str | None = None,
 ) -> None:
     try:
         log = AIInteractionLog(
             user_id=current_user.id,
             role=current_user.role.value,
-            assistant_type="CUSTOMER",
+            assistant_type=assistant_type,
             prompt_summary=prompt_summary[:500],
             tools_called=",".join(tools_called) if tools_called else None,
             token_usage=token_usage,
-            model_version=f"{model_used}:{ai_constants.CUSTOMER_ASSISTANT_PROMPT_VERSION}",
+            model_version=f"{model_used}:{assistant_type.lower()}",
             status=status,
             error_message=error_message[:1000] if error_message else None,
         )
@@ -46,11 +50,6 @@ def _log_interaction(
 
 
 def _is_quota_or_rate_error(e: Exception) -> bool:
-    """Errors here trigger falling through to the next provider in the
-    chain, rather than stopping immediately. Includes genuine quota/rate
-    limits, and also provider-side account/project restrictions (like
-    Gemini's 'denied access' 403) that make a specific provider unusable
-    right now but aren't a bug in our own request."""
     text = str(e).lower()
     return any(term in text for term in [
         "quota", "rate limit", "429", "resource_exhausted", "rate_limit_exceeded",
@@ -60,18 +59,21 @@ def _is_quota_or_rate_error(e: Exception) -> bool:
 
 # ---------- Gemini adapter ----------
 
-def _gemini_tool_declarations() -> list[genai_types.Tool]:
+def _gemini_tool_declarations(tool_definitions: list[dict]) -> list[genai_types.Tool]:
     function_declarations = []
-    for t in TOOL_DEFINITIONS:
+    for t in tool_definitions:
         function_declarations.append(genai_types.FunctionDeclaration(
             name=t["name"], description=t["description"], parameters=t["input_schema"],
         ))
     return [genai_types.Tool(function_declarations=function_declarations)]
 
 
-def _run_with_gemini(db: Session, current_user: User, api_key: str, model_name: str, messages: list[dict]) -> tuple[str, list[str], int]:
+def _run_with_gemini(
+    db: Session, current_user: User, api_key: str, model_name: str, messages: list[dict],
+    system_prompt: str, tool_definitions: list[dict], dispatch_fn: Callable,
+) -> tuple[str, list[str], int]:
     client = genai.Client(api_key=api_key)
-    tools = _gemini_tool_declarations()
+    tools = _gemini_tool_declarations(tool_definitions)
 
     contents = []
     for m in messages:
@@ -85,10 +87,7 @@ def _run_with_gemini(db: Session, current_user: User, api_key: str, model_name: 
         response = client.models.generate_content(
             model=model_name,
             contents=contents,
-            config=genai_types.GenerateContentConfig(
-                system_instruction=ai_constants.CUSTOMER_ASSISTANT_SYSTEM_PROMPT,
-                tools=tools,
-            ),
+            config=genai_types.GenerateContentConfig(system_instruction=system_prompt, tools=tools),
         )
         if response.usage_metadata:
             total_tokens += (response.usage_metadata.prompt_token_count or 0) + (response.usage_metadata.candidates_token_count or 0)
@@ -104,29 +103,32 @@ def _run_with_gemini(db: Session, current_user: User, api_key: str, model_name: 
         function_response_parts = []
         for fc in function_calls:
             tools_called.append(fc.name)
-            result = dispatch_tool(db, current_user, fc.name, dict(fc.args) if fc.args else {})
+            result = dispatch_fn(db, current_user, fc.name, dict(fc.args) if fc.args else {})
             function_response_parts.append(genai_types.Part(
                 function_response=genai_types.FunctionResponse(name=fc.name, response={"result": result})
             ))
         contents.append(genai_types.Content(role="user", parts=function_response_parts))
 
-    return "I wasn't able to fully answer that — please try asking more specifically, or check My Account directly.", tools_called, total_tokens
+    return "I wasn't able to fully answer that — please try asking more specifically.", tools_called, total_tokens
 
 
-# ---------- Groq adapter (OpenAI-compatible tool-calling format) ----------
+# ---------- Groq adapter ----------
 
-def _groq_tool_definitions() -> list[dict]:
+def _groq_tool_definitions(tool_definitions: list[dict]) -> list[dict]:
     return [
         {"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["input_schema"]}}
-        for t in TOOL_DEFINITIONS
+        for t in tool_definitions
     ]
 
 
-def _run_with_groq(db: Session, current_user: User, api_key: str, model_name: str, messages: list[dict]) -> tuple[str, list[str], int]:
+def _run_with_groq(
+    db: Session, current_user: User, api_key: str, model_name: str, messages: list[dict],
+    system_prompt: str, tool_definitions: list[dict], dispatch_fn: Callable,
+) -> tuple[str, list[str], int]:
     client = Groq(api_key=api_key)
-    tools = _groq_tool_definitions()
+    tools = _groq_tool_definitions(tool_definitions)
 
-    chat_messages = [{"role": "system", "content": ai_constants.CUSTOMER_ASSISTANT_SYSTEM_PROMPT}]
+    chat_messages = [{"role": "system", "content": system_prompt}]
     chat_messages.extend(messages)
 
     tools_called: list[str] = []
@@ -148,16 +150,17 @@ def _run_with_groq(db: Session, current_user: User, api_key: str, model_name: st
         for tc in message.tool_calls:
             tools_called.append(tc.function.name)
             tool_input = json.loads(tc.function.arguments) if tc.function.arguments else {}
-            result = dispatch_tool(db, current_user, tc.function.name, tool_input)
+            result = dispatch_fn(db, current_user, tc.function.name, tool_input)
             chat_messages.append({"role": "tool", "tool_call_id": tc.id, "content": json.dumps(result, default=str)})
 
-    return "I wasn't able to fully answer that — please try asking more specifically, or check My Account directly.", tools_called, total_tokens
+    return "I wasn't able to fully answer that — please try asking more specifically.", tools_called, total_tokens
 
 
-# ---------- Public entry point ----------
+# ---------- Generic runner (shared by all assistant types) ----------
 
-def run_customer_assistant(
-    db: Session, current_user: User, user_message: str, conversation_history: list[AIChatMessage]
+def _run_assistant(
+    db: Session, current_user: User, assistant_type: str, user_message: str,
+    conversation_history: list[AIChatMessage], system_prompt: str, tool_definitions: list[dict], dispatch_fn: Callable,
 ) -> tuple[str, list[str]]:
     prompt_summary = user_message
     messages = [{"role": m.role, "content": m.content} for m in conversation_history]
@@ -165,30 +168,51 @@ def run_customer_assistant(
 
     attempts = []
     if settings.gemini_api_key_1:
-        attempts.append(("gemini-key-1", lambda: _run_with_gemini(db, current_user, settings.gemini_api_key_1, settings.ai_model_name_gemini, messages)))
+        attempts.append(("gemini-key-1", lambda: _run_with_gemini(db, current_user, settings.gemini_api_key_1, settings.ai_model_name_gemini, messages, system_prompt, tool_definitions, dispatch_fn)))
     if settings.gemini_api_key_2:
-        attempts.append(("gemini-key-2", lambda: _run_with_gemini(db, current_user, settings.gemini_api_key_2, settings.ai_model_name_gemini, messages)))
+        attempts.append(("gemini-key-2", lambda: _run_with_gemini(db, current_user, settings.gemini_api_key_2, settings.ai_model_name_gemini, messages, system_prompt, tool_definitions, dispatch_fn)))
     if settings.groq_api_key:
-        attempts.append(("groq", lambda: _run_with_groq(db, current_user, settings.groq_api_key, settings.ai_model_name_groq, messages)))
+        attempts.append(("groq", lambda: _run_with_groq(db, current_user, settings.groq_api_key, settings.ai_model_name_groq, messages, system_prompt, tool_definitions, dispatch_fn)))
 
     if not attempts:
-        _log_interaction(db, current_user, prompt_summary, [], None, "UNAVAILABLE", "none")
-        print("[DEBUG] No provider keys configured at all — settings.gemini_api_key_1/2/groq_api_key are all falsy.")
-        return "The assistant isn't available right now. Please use the My Account page, or contact staff for help.", []
+        _log_interaction(db, current_user, assistant_type, prompt_summary, [], None, "UNAVAILABLE", "none")
+        return "The assistant isn't available right now. Please contact a colleague or use the app directly.", []
 
     last_error = None
     for label, attempt_fn in attempts:
         try:
             reply, tools_called, tokens = attempt_fn()
-            _log_interaction(db, current_user, prompt_summary, tools_called, tokens, "SUCCESS", label)
+            _log_interaction(db, current_user, assistant_type, prompt_summary, tools_called, tokens, "SUCCESS", label)
             return reply, tools_called
         except Exception as e:
             last_error = e
-            print(f"[DEBUG] {label} failed: {type(e).__name__}: {e}")
             if _is_quota_or_rate_error(e):
                 continue
-            _log_interaction(db, current_user, prompt_summary, [], None, "FAILED", label, str(e))
-            return "The assistant is temporarily unavailable. Please try again shortly, or use My Account directly.", []
+            _log_interaction(db, current_user, assistant_type, prompt_summary, [], None, "FAILED", label, str(e))
+            return "The assistant is temporarily unavailable. Please try again shortly.", []
 
-    _log_interaction(db, current_user, prompt_summary, [], None, "FAILED", "all-providers-exhausted", str(last_error))
-    return "The assistant is very busy right now (all free capacity used). Please try again in a moment, or use My Account directly.", []
+    _log_interaction(db, current_user, assistant_type, prompt_summary, [], None, "FAILED", "all-providers-exhausted", str(last_error))
+    return "The assistant is very busy right now. Please try again in a moment.", []
+
+
+# ---------- Public entry points ----------
+
+def run_customer_assistant(
+    db: Session, current_user: User, user_message: str, conversation_history: list[AIChatMessage]
+) -> tuple[str, list[str]]:
+    return _run_assistant(
+        db, current_user, "CUSTOMER", user_message, conversation_history,
+        ai_constants.CUSTOMER_ASSISTANT_SYSTEM_PROMPT, TOOL_DEFINITIONS, dispatch_tool,
+    )
+
+
+def run_staff_assistant(
+    db: Session, current_user: User, user_message: str, conversation_history: list[AIChatMessage]
+) -> tuple[str, list[str]]:
+    role = current_user.role.value
+    system_prompt = ai_staff_constants.build_staff_system_prompt(role)
+    tool_definitions = get_tool_definitions_for_role(role)
+    return _run_assistant(
+        db, current_user, "STAFF", user_message, conversation_history,
+        system_prompt, tool_definitions, dispatch_staff_tool,
+    )

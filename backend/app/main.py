@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routers import (
     auth, hotels, bookings, service_requests, billing, audit,
     restaurants, reservations, orders, restaurant_billing, delivery, inventory,
-    notifications, dashboard, reports, business_rules, ai_customer_assistant,
+    notifications, dashboard, reports, business_rules, ai_customer_assistant, ai_staff_assistant,
 )
 
 app = FastAPI(
@@ -38,6 +38,7 @@ app.include_router(dashboard.router)
 app.include_router(reports.router)
 app.include_router(business_rules.router)
 app.include_router(ai_customer_assistant.router)
+app.include_router(ai_staff_assistant.router)
 
 
 @app.get("/health")

@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
 import { AuthProvider } from './context/AuthContext'
 import { AssistantProvider } from './context/AssistantContext'
+import { StaffAssistantProvider } from './context/StaffAssistantContext'
 import App from './App.jsx'
 import './index.css'
 
@@ -11,7 +12,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <AuthProvider>
         <AssistantProvider>
-          <App />
+          <StaffAssistantProvider>
+            <App />
+          </StaffAssistantProvider>
         </AssistantProvider>
       </AuthProvider>
     </BrowserRouter>
