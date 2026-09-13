@@ -10,9 +10,17 @@ function ChatIcon() {
   )
 }
 
+function MinimizeIcon() {
+  return (
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 12h12" />
+    </svg>
+  )
+}
+
 function CloseIcon() {
   return (
-    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
       <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
     </svg>
   )
@@ -36,6 +44,11 @@ function TypingIndicator() {
   )
 }
 
+const WELCOME_MESSAGE = {
+  role: 'assistant',
+  content: "Hi! I'm your guest assistant. Ask me about your bookings, orders, reservations, invoices, or hotel policies.",
+}
+
 export default function CustomerAssistantWidget() {
   const { messages, setMessages, open, setOpen } = useAssistant()
   const [input, setInput] = useState('')
@@ -48,6 +61,15 @@ export default function CustomerAssistantWidget() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
   }, [messages, loading, open])
+
+  function handleMinimize() {
+    setOpen(false)
+  }
+
+  function handleClose() {
+    setOpen(false)
+    setMessages([WELCOME_MESSAGE])
+  }
 
   async function handleSend(e) {
     e.preventDefault()
@@ -96,14 +118,26 @@ export default function CustomerAssistantWidget() {
               <p className="text-[13px] font-bold text-white">Guest Assistant</p>
               <p className="text-[11px] text-white/50">Here to help with your stay</p>
             </div>
-            <button
-              type="button"
-              onClick={() => setOpen(false)}
-              className="rounded-lg p-1.5 text-white/70 hover:bg-white/10 hover:text-white"
-              aria-label="Close assistant"
-            >
-              <CloseIcon />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={handleMinimize}
+                className="rounded-lg p-1.5 text-white/70 hover:bg-white/10 hover:text-white"
+                aria-label="Minimize assistant"
+                title="Minimize"
+              >
+                <MinimizeIcon />
+              </button>
+              <button
+                type="button"
+                onClick={handleClose}
+                className="rounded-lg p-1.5 text-white/70 hover:bg-white/10 hover:text-white"
+                aria-label="Close assistant and clear conversation"
+                title="Close and clear conversation"
+              >
+                <CloseIcon />
+              </button>
+            </div>
           </div>
 
           <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto bg-slate-50/60 px-4 py-4">
