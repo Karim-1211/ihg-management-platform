@@ -1,0 +1,81 @@
+# Deployment, Backup & Rollback Strategy
+
+**Status: this is a documented recommendation for when this project is deployed. No backup service, scheduled job, or production infrastructure currently exists or runs anywhere. This document describes what SHOULD be done at deployment time (Phase 27), not something already active.**
+
+## 1. PostgreSQL Backup Recommendation
+
+Use `pg_dump` for logical backups (portable, human-restorable) rather than raw filesystem snapshots, unless the hosting provider's managed-Postgres offering already includes automated snapshotting (e.g., Render, Railway, and RDS all do this natively — prefer the platform's built-in mechanism over a custom script if available).
+
+```bash
+pg_dump -Fc ihg_management > ihg_backup_$(date +%Y%m%d_%H%M%S).dump
+```
+
+The `-Fc` (custom format) flag produces a compressed, selectively-restorable dump — preferred over plain SQL text dumps for anything beyond a small demo database.
+
+## 2. Backup Frequency Recommendation
+
+- **Production, actively transacting:** daily automated backups at minimum, retained separately from the primary database server (a backup stored on the same disk as the database it protects does not protect against disk failure).
+- **Before any migration or deployment:** always take a manual, on-demand backup immediately before running `alembic upgrade head` against production data — this is a pre-deployment checkpoint, not a substitute for scheduled backups.
+
+## 3. Retention Considerations
+
+- Daily backups: retain at least 7–14 days.
+- Weekly backups: retain at least 4–8 weeks.
+- Monthly backups: retain per actual business/compliance requirements (this project has no stated regulatory retention requirement; a real hotel operator would need to confirm this against local law, e.g., financial record retention periods).
+
+## 4. Restore Verification
+
+A backup that has never been restored is unverified. Recommendation: periodically (e.g., monthly) restore the latest backup into a separate, non-production database and run the existing regression suite (`test_service_flow.ps1`, etc.) against it to confirm the restored data is actually usable, not merely present.
+
+## 5. Alembic Migration Procedure
+
+Standard sequence, already proven throughout this project's 20+ migrations:
+
+1. Confirm current head: `alembic current`
+2. Generate migration: `alembic revision -m "description"`
+3. **Manually review the generated file** — this project has never auto-applied an unreviewed migration
+4. Apply: `alembic upgrade head`
+5. Verify in the database directly (e.g., via pgAdmin) that the expected schema change actually occurred
+6. Run the relevant regression tests before considering the migration complete
+
+## 6. Application Rollback vs. Database Rollback — these are different operations
+
+- **Application rollback** (redeploying a previous code version) is usually fast and low-risk if the database schema hasn't changed incompatibly.
+- **Database rollback** (`alembic downgrade`) is higher-risk and, per this project's own migration history, **not always fully reversible** — e.g., the Phase 18.7A migration that added `HOURS` to `rule_value_type_enum` explicitly documents that PostgreSQL cannot remove an enum value without recreating the entire type, so its `downgrade()` is a deliberate no-op with that limitation stated in the migration file itself.
+- **Rule of thumb:** if a deployment fails, prefer rolling back the *application* to the previous version first. Only attempt a database downgrade if the migration itself is confirmed broken, and only after taking a fresh backup of the current (post-migration) state first, in case the downgrade needs to be reversed too.
+
+## 7. Why Destructive Migrations Require Extra Care
+
+A migration that drops a column, drops a table, or removes an enum value **cannot be perfectly undone** by `alembic downgrade` in general — the data that existed in that column/table is gone the moment the migration runs, regardless of what the downgrade function does afterward. This project's own migrations have consistently favored **additive-only changes** (new tables, new nullable columns) specifically to avoid this risk — see the Phase 15, 18, and 20 migrations, none of which drop or rename an existing column, only add new ones. Any future genuinely destructive migration should be preceded by a manual backup, a documented reason why it can't be done additively, and a explicit sign-off, not just tested via the reversible-in-theory `downgrade()` function.
+
+## 8. Pre-Deployment Backup/Checkpoint
+
+Before running `alembic upgrade head` against a production database, always:
+1. Take a fresh `pg_dump` backup (per section 1)
+2. Confirm the backup file is non-empty and has a reasonable size compared to the last backup
+3. Only then proceed with the migration
+
+## 9. Recovery Procedure
+
+If a deployment or migration causes a production incident:
+1. Stop new writes if possible (maintenance mode / take the application offline)
+2. Assess: is this an application bug (rollback the app) or a data problem (restore from the pre-deployment backup)?
+3. If restoring: `pg_restore` the pre-deployment dump into a fresh database, verify it with the regression suite, then point the application back at the restored database
+4. Document what happened and why, so the same class of incident doesn't recur
+
+## 10. Safe Deployment Sequence (Phase 24.4)
+
+The correct order for deploying a change that includes both code and a migration:
+
+1. Take a pre-deployment backup (section 8)
+2. Deploy the new application code, but do **not** yet point live traffic at it
+3. Run `alembic upgrade head` against the target database — migrations must complete successfully before the new application code is allowed to serve real traffic, since the new code may depend on the new schema
+4. Verify `/health` reports `"status": "healthy"` against the migrated database
+5. Only then route live traffic to the new version
+6. Keep the previous application version available for fast rollback if `/health` or early monitoring shows a problem
+
+This sequencing — migrate first, then verify health, then cut over traffic — is what prevents the failure mode of "new code half-running against an old schema" or "new schema half-migrated while old code is still serving requests," either of which risks silent data corruption.
+
+## Explicitly deferred (Phase 27, not this document)
+
+Real scheduled backup infrastructure, backup storage/cloud configuration, actual production hosting, CI/CD pipelines, container orchestration, monitoring platforms, and automated deployment systems are all real infrastructure decisions that depend on the actual hosting provider chosen — they are deliberately out of scope here, per the locked Phase 24 boundary.
