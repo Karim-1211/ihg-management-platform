@@ -42,8 +42,12 @@ The delivery then moves through the driver's own workflow (Picked Up → Out for
 1. Go to **Reservations** to see upcoming table bookings.
 2. When guests arrive, you can update the reservation status (e.g., to Seated).
 
-### Handling Bills
-1. Go to **Bills** to see restaurant invoices — these are generated automatically once an order is marked Served.
+
+### Recording Inventory Transactions
+1. Go to **Inventory**.
+2. Click **Manage** on any item to see its current stock and history.
+3. To record a change, choose a type — **Purchase** or **Return** (adds stock), or **Waste**, **Manual Adjustment**, or **Service Usage** (removes stock).
+4. Enter the quantity and an optional note, then click **Record**.
 
 ## 5. Status Meanings
 
@@ -70,4 +74,4 @@ The delivery then moves through the driver's own workflow (Picked Up → Out for
 
 ## 8. Your Permissions
 
-As a Waiter, you can manage tables, orders, reservations, restaurant bills, and delivery assignment, and view inventory stock levels. You cannot access kitchen-only screens, hotel bookings, or business reports.
+As a Waiter, you can manage tables, orders, reservations, restaurant bills, delivery assignment, and record inventory transactions (purchases, waste, adjustments) for your restaurant. You cannot create new inventory items, access kitchen-only screens, hotel bookings, or business reports.

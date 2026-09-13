@@ -27,10 +27,12 @@ Your sidebar shows:
 
 Marking a task Done automatically makes the room available again for new bookings.
 
-### Handling a Service Request
-1. Go to **Service Requests**.
-2. You'll see pending requests like Room Cleaning, Extra Towels, Water, or Amenities, with the room number and guest name.
-3. Once you've fulfilled the request, mark it as **Completed**.
+
+### Recording Inventory Transactions
+1. Go to **Inventory**.
+2. Click **Manage** on any item to see its current stock and history.
+3. To record a change, choose a type — **Purchase** or **Return** (adds stock), or **Waste**, **Manual Adjustment**, or **Service Usage** (removes stock) — for example, recording waste when linens or supplies are damaged or used up.
+4. Enter the quantity and an optional note, then click **Record**.
 
 ## 5. Status Meanings
 
@@ -52,4 +54,4 @@ Marking a task Done automatically makes the room available again for new booking
 
 ## 8. Your Permissions
 
-As Housekeeping staff, you can view and update housekeeping tasks and service requests, and view inventory stock levels. You cannot access bookings, billing, or restaurant-side screens.
+As Housekeeping staff, you can view and update housekeeping tasks and service requests, and record inventory transactions (purchases, waste, adjustments) for your hotel. You cannot create new inventory items, access bookings, billing, or restaurant-side screens.

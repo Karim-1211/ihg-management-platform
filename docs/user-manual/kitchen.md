@@ -27,11 +27,13 @@ Your sidebar shows:
 
 The order will then leave your list — a waiter (or, for delivery, the driver) handles it from there.
 
-### Checking Ingredient Stock
+### Managing Ingredient Stock
 1. Go to **Inventory**.
-2. You can see current stock levels for ingredients.
+2. Click **Manage** on any item to see its current stock and history.
+3. To record a change, choose a type — **Purchase** or **Return** (adds stock), or **Waste**, **Manual Adjustment**, or **Service Usage** (removes stock) — for example, recording waste when an ingredient spoils or is damaged.
+4. Enter the quantity and an optional note, then click **Record**.
 
-Stock is deducted automatically when an order is confirmed — you don't need to manually record usage for recipe-linked menu items.
+Stock for recipe-linked menu items is deducted **automatically** when an order is confirmed — you only need to record transactions manually for things like waste, spoilage, or deliveries.
 
 ## 5. Status Meanings
 
@@ -52,4 +54,4 @@ Stock is deducted automatically when an order is confirmed — you don't need to
 
 ## 8. Your Permissions
 
-As Kitchen staff, you can view and update the status of orders and view inventory stock levels. You cannot access billing, customer accounts, business reports, or other restaurants' orders.
+As Kitchen staff, you can view and update the status of orders and record inventory transactions (purchases, waste, adjustments) for your restaurant. You cannot create new inventory items, access billing, customer accounts, business reports, or other restaurants' orders.

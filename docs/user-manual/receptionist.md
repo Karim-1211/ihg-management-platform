@@ -48,8 +48,13 @@ Use the **search box** at the top of the Bookings page to search by booking refe
 2. You'll see all pending and in-progress requests, with room number and guest name.
 3. Work with the relevant team (e.g., Housekeeping) to fulfill it, then update its status once complete.
 
-### Checking Stock Levels
-1. Go to **Inventory** to view current stock levels for hotel/restaurant supplies.
+### Recording Inventory Transactions
+1. Go to **Inventory**.
+2. Click **Manage** on any item to see its current stock and history.
+3. To record a change, choose a type — **Purchase** or **Return** (adds stock), or **Waste**, **Manual Adjustment**, or **Service Usage** (removes stock).
+4. Enter the quantity and an optional note, then click **Record**.
+
+You can view an item's full transaction history by clicking **Manage** on it.
 
 ## 5. Status Meanings
 
@@ -75,4 +80,4 @@ Use the **search box** at the top of the Bookings page to search by booking refe
 
 ## 8. Your Permissions
 
-As a Receptionist, you can manage bookings (check-in, check-out, cancel), view and help resolve service requests, view hotel invoices, and view inventory stock levels. You cannot access business reports, business rule settings, or restaurant-side screens.
+As a Receptionist, you can manage bookings (check-in, check-out, cancel), view and help resolve service requests, view hotel invoices, and record inventory transactions (purchases, waste, adjustments) for your hotel. You cannot create new inventory items, access business reports, business rule settings, or restaurant-side screens.
