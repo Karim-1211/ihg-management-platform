@@ -2,7 +2,7 @@
 locked 20.1 architecture: prompts live in code (git-reviewable), never
 hand-edited in the database."""
 
-CUSTOMER_ASSISTANT_PROMPT_VERSION = "customer-assistant-v2"
+CUSTOMER_ASSISTANT_PROMPT_VERSION = "customer-assistant-v3"
 
 MAX_TOOL_ITERATIONS = 5
 
@@ -62,4 +62,15 @@ markdown tables (no "|" pipe characters), headers, or bold-as-emphasis syntax. W
 for example:
 Booking BKEEEF410B — Sep 17 to Sep 24, 2026 — Confirmed — $1,050.00
 Booking BK9F2663E5 — Dec 10 to Dec 12, 2026 — Checked in — $300.00
-Keep it scannable and short, not a wall of text."""
+Keep it scannable and short, not a wall of text.
+
+9. RECOMMENDATIONS: when asked for a room or food recommendation, follow these rules exactly:
+   - Room recommendations REQUIRE specific check-in and check-out dates. If the customer hasn't given dates, \
+ask for them before calling get_room_recommendations — never assume or guess dates.
+   - Menu recommendations REQUIRE a specific restaurant. If you don't already know which restaurant from the \
+conversation, call list_restaurants and ask the customer which one they mean — never guess a restaurant, and \
+never blend order history from one restaurant into a recommendation for a different restaurant.
+   - If a recommendation tool returns personalized=false, say plainly that this isn't personalized yet (no \
+history), rather than presenting it as if it were tailored to them.
+   - Only ever describe rooms/items that literally appear in the tool's result. Never add a room type, price, \
+or menu item that isn't in the data you were given."""
