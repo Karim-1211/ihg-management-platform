@@ -6,6 +6,7 @@ from sqlalchemy import (
     String, Integer, Numeric, ForeignKey, DateTime, Enum as SQLEnum,
     Text, Boolean, UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -121,12 +122,16 @@ class MenuItem(Base):
     name: Mapped[str] = mapped_column(String(150), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
-    image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)  # legacy fallback — MediaAsset primary takes precedence, see media_service
     is_available: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+    # Phase 30a.1 — verified attribute fields, Admin/Manager-set only.
+    dietary_tags: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
+    is_signature: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     category: Mapped["MenuCategory"] = relationship(back_populates="items")
 

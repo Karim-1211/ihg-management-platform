@@ -6,6 +6,7 @@ from sqlalchemy import (
     String, Integer, Numeric, ForeignKey, DateTime, Date,
     Enum as SQLEnum, Text, Boolean, UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -64,6 +65,15 @@ class RoomType(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     base_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     max_occupancy: Mapped[int] = mapped_column(Integer, nullable=False, default=2)
+
+    # Phase 30a.1 — verified visual/attribute fields. All Admin/Manager-set,
+    # never AI-inferred (per the locked rule that images are presentation
+    # only and never a source of business fact).
+    view_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    bed_configuration: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    has_balcony: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    has_bathtub: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    amenities: Mapped[list[str]] = mapped_column(ARRAY(String), nullable=False, default=list)
 
     hotel: Mapped["Hotel"] = relationship(back_populates="room_types")
     rooms: Mapped[list["Room"]] = relationship(back_populates="room_type")
