@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import api from '../../services/api'
 import AppLayout from '../../components/layout/AppLayout'
 
 export default function ReserveTablePage() {
   const { restaurantId } = useParams()
+  // Prefilled when Alice hands off from the dining concierge, so the guest
+  // doesn't re-enter what they already told her.
+  const [searchParams] = useSearchParams()
   const [tables, setTables] = useState([])
-  const [tableId, setTableId] = useState('')
-  const [date, setDate] = useState('')
-  const [time, setTime] = useState('')
-  const [partySize, setPartySize] = useState(2)
+  const [tableId, setTableId] = useState(searchParams.get('tableId') || '')
+  const [date, setDate] = useState(searchParams.get('date') || '')
+  const [time, setTime] = useState(searchParams.get('time') || '')
+  const [partySize, setPartySize] = useState(Number(searchParams.get('partySize')) || 2)
   const [notes, setNotes] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')

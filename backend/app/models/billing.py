@@ -29,6 +29,9 @@ class PaymentMethod(str, enum.Enum):
     CARD = "CARD"
     MOBILE_PAYMENT = "MOBILE_PAYMENT"
     DEMO = "DEMO"
+    PAYPAL = "PAYPAL"
+    VISA = "VISA"
+    MASTERCARD = "MASTERCARD"
 
 
 class PaymentStatus(str, enum.Enum):

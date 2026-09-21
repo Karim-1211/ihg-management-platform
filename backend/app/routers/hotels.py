@@ -11,9 +11,20 @@ from app.schemas.hotel import (
     HotelCreate, HotelResponse, RoomTypeCreate, RoomTypeResponse,
     RoomCreate, RoomResponse, RoomStatusUpdate,
 )
-from app.services import hotel_service, booking_service
+from app.services import hotel_service, booking_service, media_service
+from app.models.media import MediaEntityType
 
 router = APIRouter(prefix="/api/v1", tags=["Hotels"])
+
+
+def _attach_hotel_image(db: Session, hotel):
+    hotel.primary_image_url = media_service.resolve_primary_image_url(db, MediaEntityType.HOTEL, hotel.id)
+    return hotel
+
+
+def _attach_room_type_image(db: Session, room_type):
+    room_type.primary_image_url = media_service.resolve_primary_image_url(db, MediaEntityType.ROOM_TYPE, room_type.id)
+    return room_type
 
 
 @router.post("/hotels", response_model=HotelResponse, status_code=201)
@@ -27,7 +38,8 @@ def create_hotel(
 
 @router.get("/hotels", response_model=list[HotelResponse])
 def list_hotels(db: Session = Depends(get_db)):
-    return hotel_service.list_hotels(db)
+    hotels = hotel_service.list_hotels(db)
+    return [_attach_hotel_image(db, h) for h in hotels]
 
 
 @router.post("/room-types", response_model=RoomTypeResponse, status_code=201)
@@ -41,7 +53,8 @@ def create_room_type(
 
 @router.get("/hotels/{hotel_id}/room-types", response_model=list[RoomTypeResponse])
 def list_room_types(hotel_id: uuid.UUID, db: Session = Depends(get_db)):
-    return hotel_service.list_room_types(db, hotel_id)
+    room_types = hotel_service.list_room_types(db, hotel_id)
+    return [_attach_room_type_image(db, rt) for rt in room_types]
 
 
 @router.post("/rooms", response_model=RoomResponse, status_code=201)

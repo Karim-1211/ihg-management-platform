@@ -150,6 +150,7 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
     managementItems.push({ to: '/staff/inventory', label: 'Inventory' })
     managementItems.push({ to: '/staff/recipes', label: 'Recipes' })
     managementItems.push({ to: '/staff/notification-preferences', label: 'Notification Settings' })
+    managementItems.push({ to: '/staff/subscribers', label: 'Newsletter' })
   }
   if (['RECEPTIONIST', 'HOUSEKEEPING', 'KITCHEN', 'WAITER'].includes(role)) {
     managementItems.push({ to: '/staff/inventory', label: 'Inventory' })

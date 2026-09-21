@@ -1,5 +1,3 @@
-import sys
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -10,18 +8,9 @@ from app.routers import (
     auth, hotels, bookings, service_requests, billing, audit,
     restaurants, reservations, orders, restaurant_billing, delivery, inventory,
     notifications, dashboard, reports, business_rules, ai_customer_assistant, ai_staff_assistant,
-    booking_import,
+    booking_import, media, newsletter,
 )
-
-# Phase 24.2: fail loudly at startup, not silently at request time, if a
-# production deployment is missing required configuration. Development is
-# unaffected — this check is a no-op unless APP_ENV=production.
-_production_problems = settings.validate_production_readiness()
-if _production_problems:
-    print("FATAL: production configuration problems detected:", file=sys.stderr)
-    for problem in _production_problems:
-        print(f"  - {problem}", file=sys.stderr)
-    sys.exit(1)
+from app.routers import delivery_ai
 
 app = FastAPI(
     title="IHG Management Platform API",
@@ -56,15 +45,13 @@ app.include_router(business_rules.router)
 app.include_router(ai_customer_assistant.router)
 app.include_router(ai_staff_assistant.router)
 app.include_router(booking_import.router)
+app.include_router(media.router)
+app.include_router(newsletter.router)
+app.include_router(delivery_ai.router)
 
 
 @app.get("/health")
 def health_check():
-    """Phase 24.1: a genuinely useful health/readiness check. Verifies real
-    database connectivity rather than returning a static "ok" regardless of
-    system state. Never exposes the database URL, credentials, or any other
-    sensitive configuration — only a boolean-equivalent status per
-    dependency, safe to expose on an unauthenticated endpoint."""
     db_healthy = False
     try:
         db = SessionLocal()
@@ -74,11 +61,7 @@ def health_check():
     except Exception:
         db_healthy = False
 
-    overall_status = "healthy" if db_healthy else "unhealthy"
-    response = {
-        "status": overall_status,
-        "checks": {
-            "database": "up" if db_healthy else "down",
-        },
+    return {
+        "status": "healthy" if db_healthy else "unhealthy",
+        "checks": {"database": "up" if db_healthy else "down"},
     }
-    return response

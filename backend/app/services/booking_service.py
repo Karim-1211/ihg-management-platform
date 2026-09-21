@@ -10,7 +10,7 @@ from app.models.hotel import (
     HousekeepingTask, HousekeepingStatus,
 )
 from app.models.user import User
-from app.schemas.hotel import BookingCreate
+from app.schemas.hotel import BookingCreate, BookingCheckoutCreate
 from app.schemas.notification_event import NotificationEvent
 from app.models.notification import NotificationType
 from app.services import audit_service
@@ -277,7 +277,7 @@ def cancel_booking(db: Session, booking_id: uuid.UUID, current_user: User) -> Bo
 def list_available_rooms(
     db: Session, check_in_date: date, check_out_date: date, hotel_id: uuid.UUID | None = None
 ) -> list[Room]:
-    query = db.query(Room).filter(Room.status.notin_([RoomStatus.MAINTENANCE, RoomStatus.OUT_OF_SERVICE]))
+    query = db.query(Room).filter(Room.status == RoomStatus.READY)
     if hotel_id:
         query = query.filter(Room.hotel_id == hotel_id)
 
@@ -322,3 +322,191 @@ def update_housekeeping_task(
     db.commit()
     db.refresh(task)
     return _attach_room_number(db, task)
+
+def create_booking_checkout(db: Session, guest: User, data: BookingCheckoutCreate):
+    """Atomically reserve a room and complete its demo payment.
+
+    The room row is locked before the overlap check, so two simultaneous
+    checkout requests cannot both reserve the same room for overlapping dates.
+    """
+    from app.models.billing import Invoice, InvoiceType, InvoiceStatus, Payment, PaymentStatus
+    from app.services.billing_service import generate_invoice_number, generate_payment_number
+
+    if data.check_out_date <= data.check_in_date:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Check-out date must be after check-in date.",
+        )
+
+    room = (
+        db.query(Room)
+        .filter(Room.id == data.room_id)
+        .with_for_update()
+        .first()
+    )
+    if not room:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room not found.")
+
+    if room.status != RoomStatus.READY:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This room is not currently ready for booking.",
+        )
+
+    room_type = db.query(RoomType).filter(RoomType.id == room.room_type_id).first()
+    if not room_type:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Room type not found.")
+
+    if data.number_of_guests > room_type.max_occupancy:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"This room allows a maximum of {room_type.max_occupancy} guest(s).",
+        )
+
+    nights = (data.check_out_date - data.check_in_date).days
+
+    min_nights = business_rule_service.get_minimum_stay_nights(db, hotel_id=room.hotel_id)
+    if nights < min_nights:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"This booking must cover at least {min_nights} night(s).",
+        )
+
+    max_nights = business_rule_service.get_maximum_stay_nights(db, hotel_id=room.hotel_id)
+    if nights > max_nights:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"This booking cannot exceed {max_nights} night(s).",
+        )
+
+    max_advance_days = business_rule_service.get_maximum_advance_booking_days(db, hotel_id=room.hotel_id)
+    today = datetime.now(timezone.utc).date()
+    if (data.check_in_date - today).days > max_advance_days:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Bookings cannot be made more than {max_advance_days} day(s) in advance.",
+        )
+
+    if has_overlapping_booking(db, room.id, data.check_in_date, data.check_out_date):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This room is already booked for the selected dates.",
+        )
+
+    room_charge = Decimal(str(room_type.base_price)) * nights
+    tax_rate = business_rule_service.get_tax_rate(db)
+    tax_amount = (room_charge * tax_rate).quantize(Decimal("0.01"))
+    total_amount = (room_charge + tax_amount).quantize(Decimal("0.01"))
+
+    booking = Booking(
+        booking_reference=generate_booking_reference(),
+        guest_id=guest.id,
+        room_id=room.id,
+        check_in_date=data.check_in_date,
+        check_out_date=data.check_out_date,
+        number_of_guests=data.number_of_guests,
+        guest_name=data.guest_name.strip(),
+        guest_email=str(data.guest_email),
+        guest_phone=data.guest_phone.strip() if data.guest_phone else None,
+        status=BookingStatus.CONFIRMED,
+        total_amount=room_charge,
+        special_requests=data.special_requests.strip() if data.special_requests else None,
+    )
+    db.add(booking)
+    db.flush()
+
+    invoice = Invoice(
+        invoice_number=generate_invoice_number(),
+        invoice_type=InvoiceType.HOTEL,
+        booking_id=booking.id,
+        customer_id=guest.id,
+        room_charge=room_charge,
+        service_charge=Decimal("0.00"),
+        subtotal=room_charge,
+        tax_amount=tax_amount,
+        discount_amount=Decimal("0.00"),
+        total_amount=total_amount,
+        amount_paid=total_amount,
+        status=InvoiceStatus.PAID,
+    )
+    db.add(invoice)
+    db.flush()
+
+    payment = Payment(
+        payment_number=generate_payment_number(),
+        invoice_id=invoice.id,
+        amount=total_amount,
+        method=data.payment_method,
+        status=PaymentStatus.COMPLETED,
+        provider="DEMO",
+        provider_reference=f"DEMO-{data.payment_method.value}-{uuid.uuid4().hex[:10].upper()}",
+        notes="Demo hotel booking checkout payment",
+        created_by=guest.id,
+        paid_at=datetime.now(timezone.utc),
+    )
+    db.add(payment)
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+    db.refresh(booking)
+    db.refresh(invoice)
+    db.refresh(payment)
+
+    audit_service.log_action(
+        db,
+        guest.id,
+        "CREATE_BOOKING_CHECKOUT",
+        "booking",
+        booking.id,
+        f"Created and paid booking {booking.booking_reference} for room {room.room_number} via {data.payment_method.value}",
+    )
+    notification_service.dispatch(db, NotificationEvent(
+        event_type=NotificationType.BOOKING_CONFIRMED,
+        actor_user_id=guest.id,
+        entity_type="booking",
+        entity_id=booking.id,
+        hotel_id=room.hotel_id,
+        metadata={
+            "customer_id": str(guest.id),
+            "booking_reference": booking.booking_reference,
+            "check_in_date": str(booking.check_in_date),
+            "check_out_date": str(booking.check_out_date),
+        },
+    ))
+    notification_service.dispatch(db, NotificationEvent(
+        event_type=NotificationType.INVOICE_CREATED,
+        actor_user_id=guest.id,
+        entity_type="invoice",
+        entity_id=invoice.id,
+        hotel_id=room.hotel_id,
+        metadata={
+            "customer_id": str(guest.id),
+            "invoice_number": invoice.invoice_number,
+            "total_amount": str(invoice.total_amount),
+        },
+    ))
+    notification_service.dispatch(db, NotificationEvent(
+        event_type=NotificationType.PAYMENT_COMPLETED,
+        actor_user_id=guest.id,
+        entity_type="payment",
+        entity_id=payment.id,
+        hotel_id=room.hotel_id,
+        metadata={
+            "customer_id": str(guest.id),
+            "amount": str(payment.amount),
+            "invoice_number": invoice.invoice_number,
+        },
+    ))
+
+    return {
+        "booking": booking,
+        "invoice_id": invoice.id,
+        "payment_id": payment.id,
+        "payment_method": payment.method,
+        "amount_paid": float(payment.amount),
+        "total_amount": float(invoice.total_amount),
+    }

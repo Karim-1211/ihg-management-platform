@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
@@ -11,9 +12,22 @@ from app.schemas.restaurant import (
     MenuCategoryCreate, MenuCategoryResponse, MenuItemCreate, MenuItemResponse, MenuItemUpdate,
     MenuWithItemsResponse, DriverListItem,
 )
-from app.services import restaurant_service
+from app.services import restaurant_service, media_service, reservation_service
+from app.models.media import MediaEntityType
 
 router = APIRouter(prefix="/api/v1", tags=["Restaurants"])
+
+
+def _attach_restaurant_image(db: Session, restaurant):
+    restaurant.primary_image_url = media_service.resolve_primary_image_url(db, MediaEntityType.RESTAURANT, restaurant.id)
+    return restaurant
+
+
+def _attach_menu_item_image(db: Session, item):
+    item.display_image_url = media_service.resolve_primary_image_url(
+        db, MediaEntityType.MENU_ITEM, item.id, legacy_fallback_url=item.image_url
+    )
+    return item
 
 
 @router.post("/restaurants", response_model=RestaurantResponse, status_code=201)
@@ -27,7 +41,8 @@ def create_restaurant(
 
 @router.get("/restaurants", response_model=list[RestaurantResponse])
 def list_restaurants(db: Session = Depends(get_db)):
-    return restaurant_service.list_restaurants(db)
+    restaurants = restaurant_service.list_restaurants(db)
+    return [_attach_restaurant_image(db, r) for r in restaurants]
 
 
 @router.post("/restaurant-tables", response_model=RestaurantTableResponse, status_code=201)
@@ -42,6 +57,18 @@ def create_table(
 @router.get("/restaurants/{restaurant_id}/tables", response_model=list[RestaurantTableResponse])
 def list_tables(restaurant_id: uuid.UUID, db: Session = Depends(get_db)):
     return restaurant_service.list_tables(db, restaurant_id)
+
+
+@router.get("/restaurants/{restaurant_id}/tables/available", response_model=list[RestaurantTableResponse])
+def list_available_tables(
+    restaurant_id: uuid.UUID,
+    reservation_start: datetime = Query(..., description="Requested start time, ISO 8601."),
+    party_size: int = Query(1, ge=1, description="Number of guests."),
+    db: Session = Depends(get_db),
+):
+    """Public — guests need this before logging in to decide whether to book."""
+    restaurant_service.get_restaurant_or_404(db, restaurant_id)
+    return reservation_service.list_available_tables(db, restaurant_id, reservation_start, party_size)
 
 
 @router.get("/restaurants/{restaurant_id}/drivers", response_model=list[DriverListItem])
@@ -83,7 +110,11 @@ def create_menu_item(
 
 @router.get("/restaurants/{restaurant_id}/menu", response_model=list[MenuWithItemsResponse])
 def get_full_menu(restaurant_id: uuid.UUID, db: Session = Depends(get_db)):
-    return restaurant_service.get_full_menu(db, restaurant_id)
+    categories = restaurant_service.get_full_menu(db, restaurant_id)
+    for category in categories:
+        for item in category.items:
+            _attach_menu_item_image(db, item)
+    return categories
 
 
 @router.patch("/menu-items/{item_id}", response_model=MenuItemResponse)

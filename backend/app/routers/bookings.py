@@ -7,7 +7,7 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_roles
 from app.models.user import User, RoleEnum
 from app.schemas.hotel import (
-    BookingCreate, BookingResponse,
+    BookingCreate, BookingResponse, BookingCheckoutCreate, BookingCheckoutResponse,
     HousekeepingTaskResponse, HousekeepingTaskUpdate,
 )
 from app.services import booking_service
@@ -22,6 +22,18 @@ def create_booking(
     current_user: User = Depends(get_current_user),
 ):
     return booking_service.create_booking(db, current_user, data)
+
+
+@router.post("/bookings/checkout", response_model=BookingCheckoutResponse, status_code=201)
+def checkout_booking(
+    data: BookingCheckoutCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.role != RoleEnum.CUSTOMER:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only customer accounts can use hotel checkout.")
+    return booking_service.create_booking_checkout(db, current_user, data)
 
 
 @router.get("/bookings/my", response_model=list[BookingResponse])

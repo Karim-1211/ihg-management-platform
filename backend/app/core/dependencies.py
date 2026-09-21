@@ -9,6 +9,7 @@ from app.core.security import decode_access_token
 from app.models.user import User, RoleEnum
 
 bearer_scheme = HTTPBearer()
+optional_bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def get_current_user(
@@ -44,3 +45,20 @@ def require_roles(*allowed_roles: RoleEnum):
         return current_user
 
     return role_checker
+
+def get_optional_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(optional_bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User | None:
+    if credentials is None:
+        return None
+    try:
+        payload = decode_access_token(credentials.credentials)
+        if payload is None or "sub" not in payload:
+            return None
+        user = db.query(User).filter(User.id == uuid.UUID(payload["sub"])).first()
+        if user is None or not user.is_active:
+            return None
+        return user
+    except (ValueError, TypeError):
+        return None

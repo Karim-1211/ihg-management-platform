@@ -31,6 +31,38 @@ def has_overlapping_reservation(
     return db.query(query.exists()).scalar()
 
 
+def list_available_tables(
+    db: Session,
+    restaurant_id: uuid.UUID,
+    reservation_start,
+    party_size: int = 1,
+    reservation_end=None,
+) -> list[RestaurantTable]:
+    """Tables at this restaurant that seat the party AND have no
+    conflicting reservation for the requested window. Reuses the exact
+    same overlap check create_reservation enforces, so what's offered
+    here can't disagree with what booking actually allows."""
+    if reservation_end is None:
+        default_minutes = business_rule_service.get_default_reservation_minutes(db)
+        reservation_end = reservation_start + timedelta(minutes=default_minutes)
+
+    tables = (
+        db.query(RestaurantTable)
+        .filter(RestaurantTable.restaurant_id == restaurant_id)
+        .order_by(RestaurantTable.capacity, RestaurantTable.table_number)
+        .all()
+    )
+
+    available = []
+    for table in tables:
+        if party_size and table.capacity < party_size:
+            continue
+        if has_overlapping_reservation(db, table.id, reservation_start, reservation_end):
+            continue
+        available.append(table)
+    return available
+
+
 def create_reservation(db: Session, customer: User, data: TableReservationCreate) -> TableReservation:
     table = get_table_or_404(db, data.table_id)
 

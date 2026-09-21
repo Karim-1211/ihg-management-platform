@@ -6,17 +6,20 @@ customer_id/guest_id. This is the sole mechanism by which the AI touches
 data; there is no other path."""
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 from collections import Counter
 
 from sqlalchemy.orm import Session
 
-from app.models.hotel import Room, RoomType
+from app.models.hotel import Hotel, Room, RoomType
 from app.models.restaurant import MenuItem, Order as OrderModel, OrderItem
+from app.models.media import MediaEntityType
 from app.models.user import User
 from app.services import booking_service, service_request_service, hotel_service
 from app.services import restaurant_service, order_service, reservation_service
+from app.models.restaurant import Restaurant
 from app.services import billing_service, restaurant_billing_service, business_rule_service
+from app.services import media_service
 
 
 def _tool_get_my_bookings(db: Session, current_user: User) -> list[dict]:
@@ -70,14 +73,63 @@ def _tool_list_hotels(db: Session, current_user: User) -> list[dict]:
     return [{"hotel_id": str(h.id), "name": h.name} for h in hotels]
 
 
-def _tool_get_hotel_info(db: Session, current_user: User, hotel_id: str) -> dict:
-    hotel = hotel_service.get_hotel_or_404(db, uuid.UUID(hotel_id))
+def _tool_get_hotel_info(db: Session, current_user: User, hotel_id: str | None = None) -> dict:
+    if hotel_id:
+        hotel = hotel_service.get_hotel_or_404(db, uuid.UUID(hotel_id))
+    else:
+        hotels = hotel_service.list_hotels(db)
+        if not hotels:
+            return {"error": "No hotels are configured."}
+        if len(hotels) > 1:
+            return {"error": "More than one hotel exists — call list_hotels and ask the customer which one they mean, then call this again with that hotel_id."}
+        hotel = hotels[0]
     return {
         "hotel_id": str(hotel.id),
         "name": hotel.name,
         "address": getattr(hotel, "address", None),
         "description": getattr(hotel, "description", None),
         "phone": getattr(hotel, "phone", None),
+    }
+
+
+def _tool_get_room_types_catalog(db: Session, current_user: User, hotel_id: str | None = None) -> dict:
+    """General information about a hotel's room types — no dates required.
+    Auto-resolves the hotel the same way _tool_get_hotel_info does."""
+    if hotel_id:
+        try:
+            hid = uuid.UUID(hotel_id)
+        except ValueError:
+            return {"error": "Invalid hotel_id."}
+        hotel = db.query(Hotel).filter(Hotel.id == hid).first()
+        if not hotel:
+            return {"error": "Hotel not found."}
+    else:
+        hotels = db.query(Hotel).all()
+        if not hotels:
+            return {"error": "No hotels are configured."}
+        if len(hotels) > 1:
+            return {"error": "More than one hotel exists — call list_hotels and ask the customer which one they mean, then call this again with that hotel_id."}
+        hotel = hotels[0]
+
+    room_types = db.query(RoomType).filter(RoomType.hotel_id == hotel.id).all()
+    return {
+        "hotel_id": str(hotel.id),
+        "hotel_name": hotel.name,
+        "room_type_count": len(room_types),
+        "room_types": [
+            {
+                "name": rt.name,
+                "description": rt.description,
+                "base_price": float(rt.base_price),
+                "max_occupancy": rt.max_occupancy,
+                "view_type": rt.view_type,
+                "bed_configuration": rt.bed_configuration,
+                "has_balcony": bool(rt.has_balcony),
+                "has_bathtub": bool(rt.has_bathtub),
+                "amenities": list(rt.amenities) if rt.amenities else [],
+            }
+            for rt in room_types
+        ],
     }
 
 
@@ -158,9 +210,50 @@ _POLICY_KEYS = {
 }
 
 
+def _tool_get_hotel_room_types(db: Session, current_user: User, hotel_id: str | None = None) -> dict:
+    """Answers general 'what rooms do you have' browsing questions —
+    deliberately separate from get_room_recommendations, which is for
+    checking real availability against specific dates. This never
+    requires dates. If hotel_id is omitted and there's exactly one hotel
+    with configured room types, that hotel is used automatically rather
+    than asking the customer to disambiguate a choice they don't have."""
+    hotels = hotel_service.list_hotels(db)
+    if hotel_id:
+        target_hotels = [h for h in hotels if str(h.id) == hotel_id]
+    else:
+        target_hotels = hotels
+
+    results = []
+    for hotel in target_hotels:
+        room_types = db.query(RoomType).filter(RoomType.hotel_id == hotel.id).all()
+        if not room_types:
+            continue
+        results.append({
+            "hotel_id": str(hotel.id),
+            "hotel_name": hotel.name,
+            "room_types": [
+                {
+                    "name": rt.name,
+                    "base_price": float(rt.base_price),
+                    "max_occupancy": rt.max_occupancy,
+                    "view_type": rt.view_type,
+                    "bed_configuration": rt.bed_configuration,
+                    "has_balcony": bool(rt.has_balcony),
+                    "has_bathtub": bool(rt.has_bathtub),
+                    "amenities": list(rt.amenities) if rt.amenities else [],
+                }
+                for rt in room_types
+            ],
+        })
+
+    if not results:
+        return {"error": "No room types are configured yet."}
+    if not hotel_id and len(results) > 1:
+        return {"multiple_hotels": True, "hotels": [{"hotel_id": r["hotel_id"], "hotel_name": r["hotel_name"]} for r in results]}
+    return {"multiple_hotels": False, "hotels": results}
+
+
 def _tool_get_business_policy_summary(db: Session, current_user: User, hotel_id: str | None = None) -> dict:
-    """Deliberately returns ONLY {friendly_label: 'value unit'} pairs — never
-    rule_id, priority, scope_type, or any other governance metadata."""
     hid = uuid.UUID(hotel_id) if hotel_id else None
     results = {}
     for label, (unit, getter) in _POLICY_KEYS.items():
@@ -172,21 +265,72 @@ def _tool_get_business_policy_summary(db: Session, current_user: User, hotel_id:
     return results
 
 
-def _room_summary(db: Session, room: Room) -> dict:
+def _room_detail(db: Session, room: Room) -> dict:
+    """Phase 30b — full descriptive detail for one room, including its
+    real primary photo. Every field here is a stored database value;
+    nothing is inferred or generated by the AI."""
     room_type = db.query(RoomType).filter(RoomType.id == room.room_type_id).first()
+
+    image_url = media_service.resolve_primary_image_url(db, MediaEntityType.ROOM, room.id)
+    if not image_url and room_type:
+        image_url = media_service.resolve_primary_image_url(db, MediaEntityType.ROOM_TYPE, room_type.id)
+
     return {
         "room_id": str(room.id),
         "room_number": room.room_number,
         "room_type": room_type.name if room_type else "Unknown",
+        "description": room_type.description if room_type else None,
         "base_price": float(room_type.base_price) if room_type else None,
+        "max_occupancy": room_type.max_occupancy if room_type else None,
+        "view_type": room_type.view_type if room_type else None,
+        "bed_configuration": room_type.bed_configuration if room_type else None,
+        "has_balcony": bool(room_type.has_balcony) if room_type else False,
+        "has_bathtub": bool(room_type.has_bathtub) if room_type else False,
+        "amenities": list(room_type.amenities) if room_type and room_type.amenities else [],
+        "primary_image_url": image_url,
     }
 
 
-def _tool_get_room_recommendations(db: Session, current_user: User, check_in_date: str, check_out_date: str) -> dict:
-    """Grounded in the customer's real booking history AND real current
-    availability for the specific requested dates. Never returns a room
-    that isn't actually free for those exact dates. If the customer has no
-    booking history, this is explicitly labeled as not personalized."""
+# Phase 30c — rule-based matching against a free-text preference string.
+# Deliberately simple keyword matching against real stored fields only
+# (view_type, has_balcony, has_bathtub). A criterion with no recognized
+# keyword in the text is never enforced — this is not full NLU, and it
+# never excludes a room based on something it can't actually check (e.g.
+# "quiet floor" has no stored signal, so it's silently not filtered on).
+_VIEW_KEYWORDS = {
+    "mountain": "mountain",
+    "sea": "sea",
+    "ocean": "sea",
+    "beach": "sea",
+    "city": "city",
+    "garden": "garden",
+}
+
+
+def _room_matches_preferences(detail: dict, preferences: str) -> bool:
+    text = preferences.lower()
+    view = (detail.get("view_type") or "").lower()
+
+    requested_views = {label for kw, label in _VIEW_KEYWORDS.items() if kw in text}
+    if requested_views and not any(v in view for v in requested_views):
+        return False
+
+    if "balcony" in text and not detail.get("has_balcony"):
+        return False
+    if any(kw in text for kw in ("bathtub", "bath tub", " tub")) and not detail.get("has_bathtub"):
+        return False
+
+    return True
+
+
+def _tool_get_room_recommendations(
+    db: Session, current_user: User, check_in_date: str, check_out_date: str, preferences: str | None = None
+) -> dict:
+    """Grounded in real current availability for the specific requested
+    dates. When `preferences` is given, results are filtered to ONLY rooms
+    matching it (never blended with unrelated rooms) — the caller (system
+    prompt) is instructed to always pass the customer's stated wants
+    through here rather than leaving filtering to the reply text alone."""
     try:
         check_in = date.fromisoformat(check_in_date)
         check_out = date.fromisoformat(check_out_date)
@@ -195,14 +339,24 @@ def _tool_get_room_recommendations(db: Session, current_user: User, check_in_dat
     if check_out <= check_in:
         return {"error": "check_out_date must be after check_in_date."}
 
+    available = booking_service.list_available_rooms(db, check_in, check_out)
+    available_details = [_room_detail(db, r) for r in available]
+
+    result: dict = {"personalized": False}
+
+    if preferences and preferences.strip():
+        matching_request = [d for d in available_details if _room_matches_preferences(d, preferences)]
+        result["preference_query"] = preferences
+        result["matching_your_request"] = matching_request[:10]
+        if not matching_request:
+            result["note"] = "No available room currently matches that specific request for these dates."
+        return result
+
     past_bookings = booking_service.list_bookings(db, guest_id=current_user.id)
     if not past_bookings:
-        available = booking_service.list_available_rooms(db, check_in, check_out)
-        return {
-            "personalized": False,
-            "note": "No booking history yet, so this is not personalized — showing general availability.",
-            "available_rooms": [_room_summary(db, r) for r in available[:10]],
-        }
+        result["note"] = "No booking history yet, so this is not personalized — showing general availability."
+        result["available_rooms"] = available_details[:10]
+        return result
 
     room_ids = [b.room_id for b in past_bookings]
     past_rooms = db.query(Room).filter(Room.id.in_(room_ids)).all()
@@ -210,23 +364,89 @@ def _tool_get_room_recommendations(db: Session, current_user: User, check_in_dat
     most_common_type_id = Counter(past_type_ids).most_common(1)[0][0] if past_type_ids else None
     preferred_type = db.query(RoomType).filter(RoomType.id == most_common_type_id).first() if most_common_type_id else None
 
-    available = booking_service.list_available_rooms(db, check_in, check_out)
-    matching = [r for r in available if preferred_type and r.room_type_id == preferred_type.id]
-    other_available = [r for r in available if not preferred_type or r.room_type_id != preferred_type.id]
+    matching_past = [d for d in available_details if preferred_type and d["room_type"] == preferred_type.name]
+    other = [d for d in available_details if d not in matching_past]
+
+    result["personalized"] = True
+    result["based_on"] = f"You've previously stayed in {preferred_type.name if preferred_type else 'various room types'}."
+    result["matching_your_past_stays"] = matching_past[:5]
+    result["other_available"] = other[:5]
+    return result
+
+
+def _resolve_single_restaurant(db: Session, restaurant_id: str | None):
+    """Mirrors the hotel auto-resolution pattern: when the platform has
+    exactly one restaurant there is nothing for the guest to choose
+    between, so never make them answer 'which restaurant?'."""
+    if restaurant_id:
+        try:
+            rid = uuid.UUID(restaurant_id)
+        except ValueError:
+            return None, {"error": "Invalid restaurant_id."}
+        restaurant = db.query(Restaurant).filter(Restaurant.id == rid).first()
+        if not restaurant:
+            return None, {"error": "Restaurant not found."}
+        return restaurant, None
+
+    restaurants = restaurant_service.list_restaurants(db)
+    if not restaurants:
+        return None, {"error": "No restaurants are configured."}
+    if len(restaurants) > 1:
+        return None, {"error": "More than one restaurant exists — call list_restaurants and ask the customer which one they mean, then call this again with that restaurant_id."}
+    return restaurants[0], None
+
+
+def _tool_get_available_tables(
+    db: Session,
+    current_user: User,
+    reservation_datetime: str,
+    party_size: int,
+    restaurant_id: str | None = None,
+) -> dict:
+    """Real table availability for a specific date/time and party size.
+    Grounded in the same overlap check the booking service enforces, so
+    a table offered here is genuinely bookable."""
+    restaurant, error = _resolve_single_restaurant(db, restaurant_id)
+    if error:
+        return error
+
+    try:
+        start = datetime.fromisoformat(reservation_datetime)
+    except ValueError:
+        return {"error": "reservation_datetime must be ISO 8601, e.g. 2026-09-25T19:30:00."}
+
+    if party_size < 1:
+        return {"error": "party_size must be at least 1."}
+
+    tables = reservation_service.list_available_tables(db, restaurant.id, start, party_size)
 
     return {
-        "personalized": True,
-        "based_on": f"You've previously stayed in {preferred_type.name if preferred_type else 'various room types'}.",
-        "matching_preference_and_available": [_room_summary(db, r) for r in matching[:5]],
-        "other_available": [_room_summary(db, r) for r in other_available[:5]],
+        "restaurant_id": str(restaurant.id),
+        "restaurant_name": restaurant.name,
+        "reservation_datetime": start.isoformat(),
+        "party_size": party_size,
+        "available_table_count": len(tables),
+        "available_tables": [
+            {"table_id": str(t.id), "table_number": t.table_number, "capacity": t.capacity}
+            for t in tables[:10]
+        ],
+    }
+
+
+def _tool_get_restaurant_info(db: Session, current_user: User, restaurant_id: str | None = None) -> dict:
+    restaurant, error = _resolve_single_restaurant(db, restaurant_id)
+    if error:
+        return error
+    return {
+        "restaurant_id": str(restaurant.id),
+        "name": restaurant.name,
+        "description": getattr(restaurant, "description", None),
+        "address": getattr(restaurant, "address", None),
+        "phone": getattr(restaurant, "phone", None),
     }
 
 
 def _tool_get_menu_recommendations(db: Session, current_user: User, restaurant_id: str) -> dict:
-    """Grounded strictly in ONE real restaurant's real current menu,
-    matched against the customer's own past orders at that same
-    restaurant. Never mixes in history from a different restaurant, and
-    never recommends an item that isn't currently is_available=True."""
     try:
         rid = uuid.UUID(restaurant_id)
     except ValueError:
@@ -282,8 +502,10 @@ TOOL_DEFINITIONS = [
      "input_schema": {"type": "object", "properties": {}, "required": []}},
     {"name": "list_hotels", "description": "List all hotels on the platform with their IDs and names.",
      "input_schema": {"type": "object", "properties": {}, "required": []}},
-    {"name": "get_hotel_info", "description": "Get public details (address, description, phone) for a specific hotel.",
-     "input_schema": {"type": "object", "properties": {"hotel_id": {"type": "string", "description": "UUID of the hotel, from list_hotels."}}, "required": ["hotel_id"]}},
+    {"name": "get_hotel_info", "description": "Get public details (address, description, phone) for a hotel. Omit hotel_id when there's only one hotel in the system — the tool resolves this automatically. Only ask the customer which hotel if this tool's result says there's more than one.",
+     "input_schema": {"type": "object", "properties": {"hotel_id": {"type": "string", "description": "Optional. Only needed if the system has more than one hotel."}}, "required": []}},
+    {"name": "get_room_types_catalog", "description": "Get general information about what room types a hotel offers — names, descriptions, prices, views, amenities. Use for questions like 'what kinds of rooms do you have' or 'how many room types are there' that do NOT require checking dates or live availability. Omit hotel_id when there's only one hotel (resolves automatically); only ask the customer which hotel if this tool's result says there's more than one.",
+     "input_schema": {"type": "object", "properties": {"hotel_id": {"type": "string", "description": "Optional. Only needed if the system has more than one hotel."}}, "required": []}},
     {"name": "list_restaurants", "description": "List all restaurants on the platform with their IDs and names.",
      "input_schema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_restaurant_menu", "description": "Get the full menu (categories and available items with prices) for a specific restaurant.",
@@ -296,11 +518,22 @@ TOOL_DEFINITIONS = [
      "input_schema": {"type": "object", "properties": {}, "required": []}},
     {"name": "get_business_policy_summary", "description": "Get customer-facing hotel policies: cancellation deadline, minimum/maximum stay, maximum advance booking.",
      "input_schema": {"type": "object", "properties": {"hotel_id": {"type": "string", "description": "Optional hotel UUID for a hotel-specific policy; omit for the general policy."}}, "required": []}},
-    {"name": "get_room_recommendations", "description": "Get room recommendations based on the customer's past bookings, for a SPECIFIC check-in and check-out date the customer must provide. Never call this without real dates from the customer.",
+    {"name": "get_hotel_room_types", "description": "Get the room types a hotel offers (name, price, view, bed configuration, amenities, max occupancy) as a general browsing answer — for questions like 'what kinds of rooms do you have' or 'what room types exist'. This does NOT require or check dates; use get_room_recommendations instead when the customer wants to know what's actually available/bookable for specific dates. If there's only one hotel with rooms configured, omitting hotel_id will resolve it automatically.",
+     "input_schema": {"type": "object", "properties": {"hotel_id": {"type": "string", "description": "Optional hotel UUID, from list_hotels. Omit if there's only one relevant hotel or none has been specified yet."}}, "required": []}},
+    {"name": "get_room_recommendations", "description": "Get room recommendations for a SPECIFIC check-in and check-out date the customer must provide. Never call this without real dates. If the customer described what they want in a room (a view, a balcony, a bathtub, etc.), ALWAYS pass their exact wording in the preferences parameter — results will be filtered to match it, showing only what they asked for. Only omit preferences when the customer gave no specific criteria at all.",
      "input_schema": {"type": "object", "properties": {
          "check_in_date": {"type": "string", "description": "Check-in date in YYYY-MM-DD format, as given by the customer."},
          "check_out_date": {"type": "string", "description": "Check-out date in YYYY-MM-DD format, as given by the customer."},
+         "preferences": {"type": "string", "description": "The customer's own words describing what they want in a room (e.g. 'mountain view with a balcony'). Pass through whenever they stated any room feature — never paraphrase or invent details."},
      }, "required": ["check_in_date", "check_out_date"]}},
+    {"name": "get_restaurant_info", "description": "Get public details (name, description, address, phone) for a restaurant. Omit restaurant_id when there's only one restaurant — the tool resolves it automatically. Only ask which restaurant if the result says there's more than one.",
+     "input_schema": {"type": "object", "properties": {"restaurant_id": {"type": "string", "description": "Optional. Only needed if the platform has more than one restaurant."}}, "required": []}},
+    {"name": "get_available_tables", "description": "Check which tables are genuinely free for a SPECIFIC date/time and party size. Use this before suggesting a guest reserve — never claim a table is available without calling it. Requires the exact datetime and party size; ask the customer for whichever is missing rather than assuming. Omit restaurant_id when there's only one restaurant.",
+     "input_schema": {"type": "object", "properties": {
+         "reservation_datetime": {"type": "string", "description": "ISO 8601 date and time, e.g. 2026-09-25T19:30:00, built from what the customer told you."},
+         "party_size": {"type": "integer", "description": "Number of guests, as given by the customer."},
+         "restaurant_id": {"type": "string", "description": "Optional. Only needed if there's more than one restaurant."},
+     }, "required": ["reservation_datetime", "party_size"]}},
     {"name": "get_menu_recommendations", "description": "Get menu item recommendations at a SPECIFIC restaurant, based on the customer's past orders at that same restaurant. Requires a restaurant_id — use list_restaurants first if you don't already know which restaurant the customer means, or ask the customer to clarify if they have history at more than one restaurant.",
      "input_schema": {"type": "object", "properties": {
          "restaurant_id": {"type": "string", "description": "UUID of the restaurant, from list_restaurants."},
@@ -313,14 +546,18 @@ TOOL_DISPATCH = {
     "get_my_service_requests": _tool_get_my_service_requests,
     "list_hotels": _tool_list_hotels,
     "get_hotel_info": _tool_get_hotel_info,
+    "get_room_types_catalog": _tool_get_room_types_catalog,
     "list_restaurants": _tool_list_restaurants,
     "get_restaurant_menu": _tool_get_restaurant_menu,
     "get_my_orders": _tool_get_my_orders,
     "get_my_reservations": _tool_get_my_reservations,
     "get_my_invoices": _tool_get_my_invoices,
     "get_business_policy_summary": _tool_get_business_policy_summary,
+    "get_hotel_room_types": _tool_get_hotel_room_types,
     "get_room_recommendations": _tool_get_room_recommendations,
     "get_menu_recommendations": _tool_get_menu_recommendations,
+    "get_restaurant_info": _tool_get_restaurant_info,
+    "get_available_tables": _tool_get_available_tables,
 }
 
 

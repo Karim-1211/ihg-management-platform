@@ -23,11 +23,18 @@ def my_deliveries(
 @router.get("/order/{order_id}", response_model=DeliveryResponse)
 def delivery_for_order(
     order_id: uuid.UUID,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    db=Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
-    delivery = delivery_service.get_delivery_for_order(db, order_id)
-    return delivery_service._attach_display_fields(db, delivery)
+    delivery = delivery_service.get_delivery_for_order(
+        db,
+        current_user,
+        order_id,
+    )
+    return delivery_service._attach_display_fields(
+        db,
+        delivery,
+    )
 
 
 @router.get("/restaurant/{restaurant_id}", response_model=list[DeliveryResponse])

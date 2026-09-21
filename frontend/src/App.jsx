@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { useAuth } from './context/AuthContext'
 import api from './services/api'
@@ -6,6 +6,7 @@ import LoginPage from './pages/auth/LoginPage'
 import RegisterPage from './pages/auth/RegisterPage'
 import HotelsPage from './pages/hotels/HotelsPage'
 import HotelRoomsPage from './pages/hotels/HotelRoomsPage'
+import HotelBookingCheckoutPage from './pages/customer/HotelBookingCheckoutPage'
 import MyBookingsPage from './pages/bookings/MyBookingsPage'
 import MyInvoicesPage from './pages/bookings/MyInvoicesPage'
 import StaffBookingsPage from './pages/staff/StaffBookingsPage'
@@ -34,8 +35,16 @@ import EmailLogPage from './pages/staff/EmailLogPage'
 import DashboardPage from './pages/staff/DashboardPage'
 import ReportsPage from './pages/staff/ReportsPage'
 import BusinessRulesPage from './pages/staff/BusinessRulesPage'
+import SubscribersPage from './pages/staff/SubscribersPage'
 import MyAccountPage from './pages/customer/MyAccountPage'
 import AppLayout from './components/layout/AppLayout'
+import DeliveryHomePage from './pages/customer/DeliveryHomePage'
+import DeliveryRestaurantPage from './pages/customer/DeliveryRestaurantPage'
+import DeliveryCartPage from './pages/customer/DeliveryCartPage'
+import DeliveryCheckoutPage from './pages/customer/DeliveryCheckoutPage'
+import DeliveryOrderConfirmationPage from './pages/customer/DeliveryOrderConfirmationPage'
+import DeliveryOrderTrackingPage from './pages/customer/DeliveryOrderTrackingPage'
+import DeliveryOrderHistoryPage from './pages/customer/DeliveryOrderHistoryPage'
 
 const SHADOW_REST = 'shadow-[0_1px_2px_rgba(15,23,42,0.04),0_2px_8px_-2px_rgba(15,23,42,0.06),0_16px_32px_-12px_rgba(15,23,42,0.10)]'
 
@@ -177,8 +186,17 @@ function HomePage() {
 
 function ProtectedRoute({ children, allowedRoles }) {
   const { user, loading } = useAuth()
+  const location = useLocation()
   if (loading) return <div className="min-h-screen flex items-center justify-center text-gray-500">Loading...</div>
-  if (!user) return <Navigate to="/login" replace />
+  if (!user) {
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: `${location.pathname}${location.search}` }}
+      />
+    )
+  }
   if (allowedRoles && !allowedRoles.includes(user.role)) {
     return (
       <AppLayout>
@@ -198,14 +216,22 @@ function App() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
-      <Route path="/hotels" element={<ProtectedRoute><HotelsPage /></ProtectedRoute>} />
-      <Route path="/hotels/:hotelId" element={<ProtectedRoute><HotelRoomsPage /></ProtectedRoute>} />
+      <Route path="/hotels" element={<HotelsPage />} />
+      <Route path="/hotels/:hotelId" element={<HotelRoomsPage />} />
+      <Route
+        path="/hotels/:hotelId/booking/checkout"
+        element={
+          <ProtectedRoute allowedRoles={['CUSTOMER']}>
+            <HotelBookingCheckoutPage />
+          </ProtectedRoute>
+        }
+      />
       <Route path="/my-bookings" element={<ProtectedRoute><MyBookingsPage /></ProtectedRoute>} />
       <Route path="/my-invoices" element={<ProtectedRoute><MyInvoicesPage /></ProtectedRoute>} />
-      <Route path="/restaurants" element={<ProtectedRoute><RestaurantsPage /></ProtectedRoute>} />
-      <Route path="/restaurants/:restaurantId" element={<ProtectedRoute><RestaurantMenuPage /></ProtectedRoute>} />
-      <Route path="/restaurants/:restaurantId/delivery" element={<ProtectedRoute><DeliveryOrderPage /></ProtectedRoute>} />
-      <Route path="/restaurants/:restaurantId/reserve" element={<ProtectedRoute><ReserveTablePage /></ProtectedRoute>} />
+      <Route path="/restaurants" element={<RestaurantsPage />} />
+      <Route path="/restaurants/:restaurantId" element={<RestaurantMenuPage />} />
+      <Route path="/restaurants/:restaurantId/delivery" element={<DeliveryOrderPage />} />
+      <Route path="/restaurants/:restaurantId/reserve" element={<ReserveTablePage />} />
       <Route path="/my-orders" element={<ProtectedRoute><MyOrdersPage /></ProtectedRoute>} />
       <Route path="/my-reservations" element={<ProtectedRoute><MyReservationsPage /></ProtectedRoute>} />
       <Route path="/my-restaurant-invoices" element={<ProtectedRoute><MyRestaurantInvoicesPage /></ProtectedRoute>} />
@@ -278,6 +304,45 @@ function App() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/staff/subscribers"
+        element={
+          <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'MANAGER']}>
+            <SubscribersPage />
+          </ProtectedRoute>
+        }
+      />
+        <Route path="/delivery" element={<DeliveryHomePage />} />
+
+<Route
+  path="/delivery/restaurants/:restaurantId"
+  element={<DeliveryRestaurantPage />}
+/>
+
+<Route
+  path="/delivery/restaurants/:restaurantId/cart"
+  element={<DeliveryCartPage />}
+/>
+
+<Route
+  path="/delivery/restaurants/:restaurantId/checkout"
+  element={<DeliveryCheckoutPage />}
+/>
+
+<Route
+  path="/delivery/orders/:orderId/confirmation"
+  element={<DeliveryOrderConfirmationPage />}
+/>
+
+<Route
+  path="/delivery/orders/:orderId/tracking"
+  element={<DeliveryOrderTrackingPage />}
+/>
+
+<Route
+  path="/delivery/orders"
+  element={<DeliveryOrderHistoryPage />}
+/>
     </Routes>
   )
 }

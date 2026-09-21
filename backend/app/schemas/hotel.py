@@ -1,10 +1,11 @@
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, EmailStr
 
 from app.models.hotel import RoomStatus, BookingStatus, HousekeepingStatus
 from app.models.service_request import ServiceRequestType, ServiceRequestStatus
+from app.models.billing import PaymentMethod
 
 
 # ---------- Hotel ----------
@@ -30,6 +31,7 @@ class HotelResponse(BaseModel):
     email: str | None
     is_active: bool
     created_at: datetime
+    primary_image_url: str | None = None  # Phase 30a.4 — resolved via media_service, never a raw DB column
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -51,6 +53,12 @@ class RoomTypeResponse(BaseModel):
     description: str | None
     base_price: float
     max_occupancy: int
+    view_type: str | None = None
+    bed_configuration: str | None = None
+    has_balcony: bool = False
+    has_bathtub: bool = False
+    amenities: list[str] = []
+    primary_image_url: str | None = None  # Phase 30a.4 — resolved via media_service
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -89,6 +97,18 @@ class BookingCreate(BaseModel):
     special_requests: str | None = None
 
 
+class BookingCheckoutCreate(BaseModel):
+    room_id: uuid.UUID
+    check_in_date: date
+    check_out_date: date
+    number_of_guests: int = Field(ge=1, default=1)
+    guest_name: str = Field(min_length=2, max_length=200)
+    guest_email: EmailStr
+    guest_phone: str | None = Field(default=None, max_length=30)
+    special_requests: str | None = Field(default=None, max_length=2000)
+    payment_method: PaymentMethod
+
+
 class BookingResponse(BaseModel):
     id: uuid.UUID
     booking_reference: str
@@ -97,12 +117,24 @@ class BookingResponse(BaseModel):
     check_in_date: date
     check_out_date: date
     number_of_guests: int
+    guest_name: str | None = None
+    guest_email: str | None = None
+    guest_phone: str | None = None
     status: BookingStatus
     total_amount: float
     special_requests: str | None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class BookingCheckoutResponse(BaseModel):
+    booking: BookingResponse
+    invoice_id: uuid.UUID
+    payment_id: uuid.UUID
+    payment_method: PaymentMethod
+    amount_paid: float
+    total_amount: float
 
 
 # ---------- Housekeeping ----------

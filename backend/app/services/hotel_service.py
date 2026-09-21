@@ -4,6 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.models.hotel import Hotel, RoomType, Room, RoomStatus
+from app.models.user import User, RoleEnum
 from app.schemas.hotel import HotelCreate, RoomTypeCreate, RoomCreate
 
 
@@ -24,6 +25,27 @@ def get_hotel_or_404(db: Session, hotel_id: uuid.UUID) -> Hotel:
     if not hotel:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Hotel not found.")
     return hotel
+
+
+def assert_hotel_access(db: Session, current_user: User, hotel_id: uuid.UUID) -> Hotel:
+    """Phase 30a.2 — central tenant-boundary check for hotel-scoped write
+    operations (media management, and any future hotel-scoped write),
+    mirroring the exact pattern already proven in
+    restaurant_service.assert_restaurant_access."""
+    hotel = get_hotel_or_404(db, hotel_id)
+
+    if current_user.role == RoleEnum.SUPER_ADMIN:
+        return hotel
+
+    if current_user.role == RoleEnum.MANAGER:
+        if current_user.hotel_id != hotel.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not manage this hotel.",
+            )
+        return hotel
+
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have access to this hotel.")
 
 
 def create_room_type(db: Session, data: RoomTypeCreate) -> RoomType:

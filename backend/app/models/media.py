@@ -12,6 +12,7 @@ from app.core.database import Base
 
 class MediaEntityType(str, enum.Enum):
     HOTEL = "HOTEL"
+    ROOM = "ROOM"
     ROOM_TYPE = "ROOM_TYPE"
     RESTAURANT = "RESTAURANT"
     MENU_ITEM = "MENU_ITEM"

@@ -7,7 +7,10 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user, require_roles
 from app.models.user import User, RoleEnum
 from app.schemas.restaurant import (
-    OrderCreate, OrderResponse, OrderStatusUpdate, OrderAssignWaiter,
+    OrderCreate,
+    OrderResponse,
+    OrderStatusUpdate,
+    OrderAssignWaiter,
 )
 from app.services import order_service
 
@@ -35,9 +38,33 @@ def my_orders(
 def orders_for_restaurant(
     restaurant_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(RoleEnum.SUPER_ADMIN, RoleEnum.MANAGER, RoleEnum.WAITER, RoleEnum.KITCHEN)),
+    current_user: User = Depends(
+        require_roles(
+            RoleEnum.SUPER_ADMIN,
+            RoleEnum.MANAGER,
+            RoleEnum.WAITER,
+            RoleEnum.KITCHEN,
+        )
+    ),
 ):
-    return order_service.list_orders_for_restaurant(db, current_user, restaurant_id)
+    return order_service.list_orders_for_restaurant(
+        db,
+        current_user,
+        restaurant_id,
+    )
+
+
+@router.get("/{order_id}", response_model=OrderResponse)
+def get_my_order(
+    order_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return order_service.get_my_order(
+        db,
+        current_user,
+        order_id,
+    )
 
 
 @router.patch("/{order_id}/status", response_model=OrderResponse)
@@ -45,16 +72,40 @@ def update_order_status(
     order_id: uuid.UUID,
     data: OrderStatusUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(RoleEnum.SUPER_ADMIN, RoleEnum.MANAGER, RoleEnum.WAITER, RoleEnum.KITCHEN)),
+    current_user: User = Depends(
+        require_roles(
+            RoleEnum.SUPER_ADMIN,
+            RoleEnum.MANAGER,
+            RoleEnum.WAITER,
+            RoleEnum.KITCHEN,
+        )
+    ),
 ):
-    return order_service.update_order_status(db, current_user, order_id, data.status)
+    return order_service.update_order_status(
+        db,
+        current_user,
+        order_id,
+        data.status,
+    )
 
 
 @router.patch("/{order_id}/assign-waiter", response_model=OrderResponse)
 def assign_waiter(
     order_id: uuid.UUID,
     data: OrderAssignWaiter,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(RoleEnum.SUPER_ADMIN, RoleEnum.MANAGER)),
+    db: Session = Depends(
+        get_db
+    ),
+    current_user: User = Depends(
+        require_roles(
+            RoleEnum.SUPER_ADMIN,
+            RoleEnum.MANAGER,
+        )
+    ),
 ):
-    return order_service.assign_waiter(db, current_user, order_id, data.waiter_id)
+    return order_service.assign_waiter(
+        db,
+        current_user,
+        order_id,
+        data.waiter_id,
+    )

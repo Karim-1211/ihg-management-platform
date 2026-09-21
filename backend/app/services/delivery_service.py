@@ -40,10 +40,48 @@ def get_delivery_or_404(db: Session, delivery_id: uuid.UUID) -> Delivery:
     return delivery
 
 
-def get_delivery_for_order(db: Session, order_id: uuid.UUID) -> Delivery:
-    delivery = db.query(Delivery).filter(Delivery.order_id == order_id).first()
+def get_delivery_for_order(
+    db: Session,
+    current_user: User,
+    order_id: uuid.UUID,
+) -> Delivery:
+    delivery = (
+        db.query(Delivery)
+        .filter(Delivery.order_id == order_id)
+        .first()
+    )
+
     if not delivery:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No delivery record exists for this order.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Delivery not found.",
+        )
+
+    order = (
+        db.query(Order)
+        .filter(Order.id == order_id)
+        .first()
+    )
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found.",
+        )
+
+    if current_user.role == RoleEnum.CUSTOMER:
+        if order.customer_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Delivery not found.",
+            )
+    else:
+        assert_restaurant_access(
+            db,
+            current_user,
+            order.restaurant_id,
+        )
+
     return delivery
 
 

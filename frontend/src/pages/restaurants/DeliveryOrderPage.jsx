@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useLocation } from 'react-router-dom'
 import api from '../../services/api'
 import AppLayout from '../../components/layout/AppLayout'
 
 export default function DeliveryOrderPage() {
   const { restaurantId } = useParams()
+  const location = useLocation()
   const [menu, setMenu] = useState([])
   const [address, setAddress] = useState('')
   const [cart, setCart] = useState({})
@@ -20,6 +21,22 @@ export default function DeliveryOrderPage() {
       .finally(() => setLoading(false))
   }, [restaurantId])
 
+  // Receives whatever the guest chose with Alice. Keyed on location.key so
+  // it also works when Alice hands off from the widget while the guest is
+  // already on this page (same route, new navigation state).
+  useEffect(() => {
+    const incoming = location.state?.prefillCart
+    if (!incoming) return
+    setCart((prev) => {
+      const merged = { ...prev }
+      for (const [itemId, qty] of Object.entries(incoming)) {
+        merged[itemId] = Math.max(merged[itemId] || 0, qty)
+      }
+      return merged
+    })
+    setConfirmation(null)
+  }, [location.key]) // eslint-disable-line react-hooks/exhaustive-deps
+
   function updateQuantity(itemId, delta) {
     setCart((prev) => {
       const current = prev[itemId] || 0
@@ -33,7 +50,7 @@ export default function DeliveryOrderPage() {
 
   function findMenuItem(itemId) {
     for (const category of menu) {
-      const found = category.items.find((i) => i.id === itemId)
+      const found = (category.items || []).find((i) => i.id === itemId)
       if (found) return found
     }
     return null
@@ -42,7 +59,7 @@ export default function DeliveryOrderPage() {
   const cartEntries = Object.entries(cart)
   const cartTotal = cartEntries.reduce((sum, [itemId, qty]) => {
     const item = findMenuItem(itemId)
-    return sum + (item ? item.price * qty : 0)
+    return sum + (item ? Number(item.price) * qty : 0)
   }, 0)
 
   async function handlePlaceOrder() {
@@ -81,37 +98,38 @@ export default function DeliveryOrderPage() {
     )
   }
 
+  const visibleMenu = menu
+    .map((c) => ({ ...c, items: (c.items || []).filter((i) => i.is_available) }))
+    .filter((c) => c.items.length > 0)
+
   return (
     <AppLayout>
-      <div className="flex items-center justify-between flex-wrap gap-3 mb-6">
-        <h1 className="text-2xl font-bold text-navy">Order for Delivery</h1>
-        <Link to={`/restaurants/${restaurantId}`} className="text-sm text-navy hover:underline">
-          Dine in instead
-        </Link>
+      <div className="mb-8 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#FF2147]">Delivery</p>
+          <h1 className="mt-1 font-serif text-4xl text-[#1F3A5F]">Order for delivery</h1>
+        </div>
+        <Link to="/restaurants" className="text-sm font-semibold text-[#1F3A5F] hover:underline">Dine in instead</Link>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <div className="lg:col-span-2 space-y-8">
-          {menu.map((category) => (
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
+        <div className="space-y-8 lg:col-span-2">
+          {visibleMenu.map((category) => (
             <div key={category.id}>
-              <h2 className="text-lg font-bold text-navy mb-3 border-b border-gray-200 pb-2">
-                {category.name}
-              </h2>
+              <h2 className="mb-3 border-b border-gray-200 pb-2 font-serif text-2xl text-[#1F3A5F]">{category.name}</h2>
               <div className="space-y-3">
                 {category.items.map((item) => (
-                  <div key={item.id} className="flex items-center justify-between bg-white rounded-xl shadow-sm p-4">
-                    <div className="flex-1">
-                      <p className="font-semibold text-navy">{item.name}</p>
-                      {item.description && <p className="text-gray-500 text-sm">{item.description}</p>}
-                      <p className="text-navy font-bold mt-1">${item.price}</p>
+                  <div key={item.id} className={`flex items-center justify-between rounded-xl bg-white p-4 shadow-sm ring-1 ${cart[item.id] ? 'ring-[#FF2147]/40' : 'ring-slate-200/70'}`}>
+                    <div className="flex-1 pr-4">
+                      <p className="font-semibold text-[#1F3A5F]">{item.name}</p>
+                      {item.description && <p className="text-sm text-gray-500">{item.description}</p>}
+                      <p className="mt-1 font-bold text-[#1F3A5F]">${Number(item.price).toFixed(2)}</p>
                     </div>
-                    {item.is_available && (
-                      <div className="flex items-center gap-3">
-                        <button onClick={() => updateQuantity(item.id, -1)} className="w-8 h-8 rounded-full bg-gray-100 text-navy font-bold hover:bg-gray-200 transition-colors">−</button>
-                        <span className="w-6 text-center font-semibold">{cart[item.id] || 0}</span>
-                        <button onClick={() => updateQuantity(item.id, 1)} className="w-8 h-8 rounded-full bg-red text-white font-bold hover:bg-red-dark transition-colors">+</button>
-                      </div>
-                    )}
+                    <div className="flex items-center gap-3">
+                      <button onClick={() => updateQuantity(item.id, -1)} className="h-8 w-8 rounded-full bg-gray-100 font-bold text-[#1F3A5F] transition-colors hover:bg-gray-200">−</button>
+                      <span className="w-6 text-center font-semibold">{cart[item.id] || 0}</span>
+                      <button onClick={() => updateQuantity(item.id, 1)} className="h-8 w-8 rounded-full bg-[#FF2147] font-bold text-white transition-colors hover:bg-[#dc1539]">+</button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -120,53 +138,53 @@ export default function DeliveryOrderPage() {
         </div>
 
         <div className="lg:col-span-1">
-          <div className="bg-white rounded-2xl shadow-md p-6 sticky top-6">
-            <h2 className="text-lg font-bold text-navy mb-4">Your Order</h2>
+          <div className="sticky top-6 rounded-2xl bg-white p-6 shadow-md ring-1 ring-slate-200/70">
+            <h2 className="mb-4 text-lg font-bold text-[#1F3A5F]">Your order</h2>
 
-            <label className="block text-sm font-medium text-gray-700 mb-1">Delivery Address</label>
+            <label className="mb-1 block text-sm font-medium text-gray-700">Delivery address</label>
             <textarea
               value={address}
               onChange={(e) => setAddress(e.target.value)}
               rows={3}
-              placeholder="Street, city, apartment/unit..."
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg mb-4 focus:outline-none focus:ring-2 focus:ring-navy"
+              placeholder="Street, city, apartment/unit — or your room number if you're staying with us"
+              className="mb-4 w-full rounded-lg border border-gray-300 px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#1F3A5F]"
             />
 
             {cartEntries.length === 0 ? (
-              <p className="text-gray-400 text-sm">No items added yet.</p>
+              <p className="text-sm text-gray-400">No items added yet.</p>
             ) : (
-              <div className="space-y-2 mb-4">
+              <div className="mb-4 space-y-2">
                 {cartEntries.map(([itemId, qty]) => {
                   const item = findMenuItem(itemId)
                   if (!item) return null
                   return (
                     <div key={itemId} className="flex justify-between text-sm">
                       <span className="text-gray-600">{qty} × {item.name}</span>
-                      <span className="text-gray-700 font-medium">${(item.price * qty).toFixed(2)}</span>
+                      <span className="font-medium text-gray-700">${(Number(item.price) * qty).toFixed(2)}</span>
                     </div>
                   )
                 })}
-                <div className="flex justify-between font-bold text-navy pt-2 border-t border-gray-100">
-                  <span>Estimated Subtotal</span>
+                <div className="flex justify-between border-t border-gray-100 pt-2 font-bold text-[#1F3A5F]">
+                  <span>Estimated subtotal</span>
                   <span>${cartTotal.toFixed(2)}</span>
                 </div>
               </div>
             )}
 
-            {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+            {error && <p className="mb-3 text-sm text-red-600">{error}</p>}
             {confirmation && (
-              <div className="mb-4 px-4 py-3 bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg">
+              <div className="mb-4 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
                 Order placed! <strong>{confirmation.order_number}</strong><br />
-                Total: ${confirmation.total_amount}
+                Total: ${Number(confirmation.total_amount).toFixed(2)}
               </div>
             )}
 
             <button
               onClick={handlePlaceOrder}
               disabled={placing}
-              className="w-full py-2.5 bg-red text-white font-semibold rounded-lg hover:bg-red-dark transition-colors disabled:opacity-50"
+              className="w-full rounded-lg bg-[#FF2147] py-3 font-semibold text-white transition-colors hover:bg-[#dc1539] disabled:opacity-50"
             >
-              {placing ? 'Placing order...' : 'Place Delivery Order'}
+              {placing ? 'Placing order...' : 'Place delivery order'}
             </button>
           </div>
         </div>

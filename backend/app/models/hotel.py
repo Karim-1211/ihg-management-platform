@@ -109,6 +109,9 @@ class Booking(Base):
     check_in_date: Mapped[date] = mapped_column(Date, nullable=False)
     check_out_date: Mapped[date] = mapped_column(Date, nullable=False)
     number_of_guests: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    guest_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    guest_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    guest_phone: Mapped[str | None] = mapped_column(String(30), nullable=True)
     status: Mapped[BookingStatus] = mapped_column(
         SQLEnum(BookingStatus, name="booking_status_enum"), nullable=False, default=BookingStatus.CONFIRMED
     )

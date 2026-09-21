@@ -5,6 +5,7 @@ import Navbar from './Navbar'
 import Sidebar from './Sidebar'
 import CustomerAssistantWidget from '../ai/CustomerAssistantWidget'
 import StaffAssistantWidget from '../ai/StaffAssistantWidget'
+import SiteFooter from './SiteFooter'
 
 const STAFF_ROLES = [
   'SUPER_ADMIN',
@@ -105,6 +106,8 @@ export default function AppLayout({ children }) {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {children}
       </main>
+
+      <SiteFooter />
 
       {user?.role === 'CUSTOMER' && <CustomerAssistantWidget />}
     </div>

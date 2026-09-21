@@ -143,6 +143,28 @@ def get_order_or_404(db: Session, order_id: uuid.UUID) -> Order:
     return order
 
 
+def get_my_order(
+    db: Session,
+    current_user: User,
+    order_id: uuid.UUID,
+) -> Order:
+    order = get_order_or_404(db, order_id)
+
+    if current_user.role == RoleEnum.CUSTOMER:
+        if order.customer_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Order not found.",
+            )
+    else:
+        assert_restaurant_access(
+            db,
+            current_user,
+            order.restaurant_id,
+        )
+
+    return _attach_display_fields(db, order)
+
 def list_orders_for_restaurant(db: Session, current_user: User, restaurant_id: uuid.UUID) -> list[Order]:
     assert_restaurant_access(db, current_user, restaurant_id)
     orders = db.query(Order).filter(Order.restaurant_id == restaurant_id).order_by(Order.created_at.desc()).all()

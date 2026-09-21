@@ -28,6 +28,7 @@ class RestaurantResponse(BaseModel):
     email: str | None
     is_active: bool
     created_at: datetime
+    primary_image_url: str | None = None  # Phase 30a.5 — resolved via media_service
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -87,6 +88,13 @@ class MenuItemResponse(BaseModel):
     price: float
     image_url: str | None
     is_available: bool
+    dietary_tags: list[str] = []
+    is_signature: bool = False
+    # Phase 30a.5 — resolved display image: MediaAsset primary if one
+    # exists, else the legacy image_url above, else None. This is the
+    # field the frontend should actually render; image_url is kept only
+    # as the raw legacy value for backward compatibility.
+    display_image_url: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
