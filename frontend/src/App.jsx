@@ -16,7 +16,6 @@ import StaffInvoicesPage from './pages/staff/StaffInvoicesPage'
 import AuditLogPage from './pages/staff/AuditLogPage'
 import RestaurantsPage from './pages/restaurants/RestaurantsPage'
 import RestaurantMenuPage from './pages/restaurants/RestaurantMenuPage'
-import DeliveryOrderPage from './pages/restaurants/DeliveryOrderPage'
 import MyOrdersPage from './pages/restaurants/MyOrdersPage'
 import ReserveTablePage from './pages/restaurants/ReserveTablePage'
 import MyReservationsPage from './pages/restaurants/MyReservationsPage'
@@ -37,14 +36,11 @@ import ReportsPage from './pages/staff/ReportsPage'
 import BusinessRulesPage from './pages/staff/BusinessRulesPage'
 import SubscribersPage from './pages/staff/SubscribersPage'
 import MyAccountPage from './pages/customer/MyAccountPage'
+import DeliveryHomePage from './pages/delivery/DeliveryHomePage'
+import DeliveryCheckoutPage from './pages/delivery/DeliveryCheckoutPage'
+import DeliveryOrdersPage from './pages/delivery/DeliveryOrdersPage'
+import DeliveryTrackingPage from './pages/delivery/DeliveryTrackingPage'
 import AppLayout from './components/layout/AppLayout'
-import DeliveryHomePage from './pages/customer/DeliveryHomePage'
-import DeliveryRestaurantPage from './pages/customer/DeliveryRestaurantPage'
-import DeliveryCartPage from './pages/customer/DeliveryCartPage'
-import DeliveryCheckoutPage from './pages/customer/DeliveryCheckoutPage'
-import DeliveryOrderConfirmationPage from './pages/customer/DeliveryOrderConfirmationPage'
-import DeliveryOrderTrackingPage from './pages/customer/DeliveryOrderTrackingPage'
-import DeliveryOrderHistoryPage from './pages/customer/DeliveryOrderHistoryPage'
 
 const SHADOW_REST = 'shadow-[0_1px_2px_rgba(15,23,42,0.04),0_2px_8px_-2px_rgba(15,23,42,0.06),0_16px_32px_-12px_rgba(15,23,42,0.10)]'
 
@@ -148,7 +144,13 @@ function HomePage() {
               <div className="space-y-2">
                 {activeOrders.map((o) => (
                   <div key={o.id} className="flex items-center justify-between text-sm">
-                    <span className="font-medium text-navy">{o.order_number}</span>
+                    {o.order_type === 'DELIVERY' ? (
+                      <button type="button" onClick={() => navigate(`/delivery/orders/${o.id}`)} className="font-medium text-navy underline-offset-4 hover:underline">
+                        {o.order_number} · Track
+                      </button>
+                    ) : (
+                      <span className="font-medium text-navy">{o.order_number}</span>
+                    )}
                     <span className="text-slate-500">{o.status.replace('_', ' ')}</span>
                   </div>
                 ))}
@@ -172,9 +174,10 @@ function HomePage() {
 
           <div>
             <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400 mb-3">Quick Actions</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <QuickAction label="Browse Hotels" onClick={() => navigate('/hotels')} />
               <QuickAction label="Dine With Us" onClick={() => navigate('/restaurants')} />
+              <QuickAction label="Order Delivery" onClick={() => navigate('/delivery')} />
               <QuickAction label="My Account" onClick={() => navigate('/my-account')} />
             </div>
           </div>
@@ -230,8 +233,36 @@ function App() {
       <Route path="/my-invoices" element={<ProtectedRoute><MyInvoicesPage /></ProtectedRoute>} />
       <Route path="/restaurants" element={<RestaurantsPage />} />
       <Route path="/restaurants/:restaurantId" element={<RestaurantMenuPage />} />
-      <Route path="/restaurants/:restaurantId/delivery" element={<DeliveryOrderPage />} />
+      {/* Legacy delivery URL — everything delivery now lives under /delivery. */}
+      <Route path="/restaurants/:restaurantId/delivery" element={<Navigate to="/delivery" replace />} />
       <Route path="/restaurants/:restaurantId/reserve" element={<ReserveTablePage />} />
+
+      <Route path="/delivery" element={<DeliveryHomePage />} />
+      <Route
+        path="/delivery/checkout"
+        element={
+          <ProtectedRoute allowedRoles={['CUSTOMER']}>
+            <DeliveryCheckoutPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/delivery/orders"
+        element={
+          <ProtectedRoute allowedRoles={['CUSTOMER']}>
+            <DeliveryOrdersPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/delivery/orders/:orderId"
+        element={
+          <ProtectedRoute allowedRoles={['CUSTOMER']}>
+            <DeliveryTrackingPage />
+          </ProtectedRoute>
+        }
+      />
+
       <Route path="/my-orders" element={<ProtectedRoute><MyOrdersPage /></ProtectedRoute>} />
       <Route path="/my-reservations" element={<ProtectedRoute><MyReservationsPage /></ProtectedRoute>} />
       <Route path="/my-restaurant-invoices" element={<ProtectedRoute><MyRestaurantInvoicesPage /></ProtectedRoute>} />
@@ -312,37 +343,6 @@ function App() {
           </ProtectedRoute>
         }
       />
-        <Route path="/delivery" element={<DeliveryHomePage />} />
-
-<Route
-  path="/delivery/restaurants/:restaurantId"
-  element={<DeliveryRestaurantPage />}
-/>
-
-<Route
-  path="/delivery/restaurants/:restaurantId/cart"
-  element={<DeliveryCartPage />}
-/>
-
-<Route
-  path="/delivery/restaurants/:restaurantId/checkout"
-  element={<DeliveryCheckoutPage />}
-/>
-
-<Route
-  path="/delivery/orders/:orderId/confirmation"
-  element={<DeliveryOrderConfirmationPage />}
-/>
-
-<Route
-  path="/delivery/orders/:orderId/tracking"
-  element={<DeliveryOrderTrackingPage />}
-/>
-
-<Route
-  path="/delivery/orders"
-  element={<DeliveryOrderHistoryPage />}
-/>
     </Routes>
   )
 }

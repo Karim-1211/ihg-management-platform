@@ -56,7 +56,7 @@ export default function CustomerAssistantWidget() {
 
   // Alice changes role with the page: on restaurant and delivery pages she
   // is the Dining Concierge; everywhere else she is the hotel concierge.
-  const isDiningPage = location.pathname.startsWith('/restaurants')
+  const isDiningPage = location.pathname.startsWith('/restaurants') || location.pathname.startsWith('/delivery')
 
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)

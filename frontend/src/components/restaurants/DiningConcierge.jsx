@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import { useAutoMic, speakThenListen, narrateThenListen, streamAssistant } from '../../lib/aliceVoice'
+import { addItemsToCart } from '../../lib/deliveryCart'
 
 const LINES = {
   greeting: { file: '/audio/alice-dining-greeting.wav', text: "Hello, I'm Alice. I can reserve a table for you, or help you find something delicious to eat. Which would you like?" },
@@ -400,20 +401,22 @@ export default function DiningConcierge({
     mic.stop()
   }
 
+  // Alice's picks go into the shared delivery basket, so they carry
+  // straight through to checkout — and survive the sign-in step.
   function goToOrder() {
     stopAll()
-    const target = `/restaurants/${restaurantId}/delivery`
     if (!Object.keys(cartRef.current).length) {
       onBeforeNavigate?.()
-      navigate(target)
+      navigate('/delivery')
       return
     }
-    const line = 'Lovely — taking you through to complete your order.'
+    addItemsToCart(restaurantId, cartRef.current)
+    const line = 'Lovely — taking you through to checkout.'
     setLog((l) => [...l, { from: 'alice', text: line }])
     narrateThenListen(line, audioRef, voiceEnabled, () => {})
     window.setTimeout(() => {
       onBeforeNavigate?.()
-      navigate(target, { state: { prefillCart: cartRef.current } })
+      navigate('/delivery/checkout')
     }, 1200)
   }
 

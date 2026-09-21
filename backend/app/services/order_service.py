@@ -4,7 +4,7 @@ from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.models.restaurant import (
-    Order, OrderItem, OrderType, OrderStatus, MenuItem, RestaurantTable,
+    Order, OrderItem, OrderType, OrderStatus, MenuItem, MenuCategory, RestaurantTable,
 )
 from app.models.user import User, RoleEnum
 from app.schemas.restaurant import OrderCreate
@@ -39,6 +39,53 @@ def _validate_order_type_fields(data: OrderCreate) -> None:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="DELIVERY orders cannot include table_id or booking_id.")
 
 
+def price_order_lines(db: Session, restaurant_id: uuid.UUID, lines) -> dict:
+    """Single source of truth for order pricing. Used by create_order AND by
+    the delivery quote endpoint, so a checkout quote can never disagree with
+    the order it previews. Every line is validated against the live menu: it
+    must exist, belong to THIS restaurant, and currently be available.
+
+    `lines` is any sequence of objects with `menu_item_id` and `quantity`.
+    The returned OrderItem objects are transient — the caller decides
+    whether to persist them."""
+    order_items: list[OrderItem] = []
+    subtotal = Decimal("0")
+    for line in lines:
+        menu_item = db.query(MenuItem).filter(MenuItem.id == line.menu_item_id).first()
+        if not menu_item:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Menu item {line.menu_item_id} not found.")
+        category = db.query(MenuCategory).filter(MenuCategory.id == menu_item.category_id).first()
+        if not category or category.restaurant_id != restaurant_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"'{menu_item.name}' is not on this restaurant's menu.",
+            )
+        if not menu_item.is_available:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"'{menu_item.name}' is currently unavailable.")
+        unit_price = Decimal(str(menu_item.price))
+        line_subtotal = _round_currency(unit_price * line.quantity)
+        subtotal += line_subtotal
+        order_items.append(OrderItem(menu_item_id=menu_item.id, quantity=line.quantity, unit_price=unit_price, subtotal=line_subtotal))
+
+    tax_rate = business_rule_service.get_tax_rate(db)
+    tax_amount = _round_currency(subtotal * tax_rate)
+
+    service_charge_rate = business_rule_service.get_restaurant_service_charge_rate(db, restaurant_id=restaurant_id)
+    service_charge_amount = _round_currency(subtotal * service_charge_rate)
+
+    discount_amount = Decimal("0")
+    total_amount = _round_currency(subtotal + tax_amount + service_charge_amount - discount_amount)
+
+    return {
+        "order_items": order_items,
+        "subtotal": subtotal,
+        "tax_amount": tax_amount,
+        "service_charge_amount": service_charge_amount,
+        "discount_amount": discount_amount,
+        "total_amount": total_amount,
+    }
+
+
 def create_order(db: Session, current_user: User, data: OrderCreate) -> Order:
     from app.models.delivery import Delivery, DeliveryStatus
     restaurant = get_restaurant_or_404(db, data.restaurant_id)
@@ -50,33 +97,18 @@ def create_order(db: Session, current_user: User, data: OrderCreate) -> Order:
         table = db.query(RestaurantTable).filter(RestaurantTable.id == data.table_id).first()
         if not table or table.restaurant_id != data.restaurant_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Table not found at this restaurant.")
-    order_items: list[OrderItem] = []
-    subtotal = Decimal("0")
-    for line in data.items:
-        menu_item = db.query(MenuItem).filter(MenuItem.id == line.menu_item_id).first()
-        if not menu_item:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Menu item {line.menu_item_id} not found.")
-        if not menu_item.is_available:
-            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"'{menu_item.name}' is currently unavailable.")
-        unit_price = Decimal(str(menu_item.price))
-        line_subtotal = _round_currency(unit_price * line.quantity)
-        subtotal += line_subtotal
-        order_items.append(OrderItem(menu_item_id=menu_item.id, quantity=line.quantity, unit_price=unit_price, subtotal=line_subtotal))
 
-    tax_rate = business_rule_service.get_tax_rate(db)
-    tax_amount = _round_currency(subtotal * tax_rate)
+    pricing = price_order_lines(db, data.restaurant_id, data.items)
+    order_items = pricing["order_items"]
+    total_amount = pricing["total_amount"]
 
-    service_charge_rate = business_rule_service.get_restaurant_service_charge_rate(db, restaurant_id=data.restaurant_id)
-    service_charge_amount = _round_currency(subtotal * service_charge_rate)
-
-    discount_amount = Decimal("0")
-    total_amount = _round_currency(subtotal + tax_amount + service_charge_amount - discount_amount)
     order = Order(
         order_number=generate_order_number(), order_type=data.order_type, restaurant_id=data.restaurant_id,
         customer_id=current_user.id if current_user.role == RoleEnum.CUSTOMER else None,
         table_id=data.table_id, delivery_address=data.delivery_address, status=OrderStatus.NEW,
-        subtotal=subtotal, tax_amount=tax_amount, service_charge_amount=service_charge_amount,
-        discount_amount=discount_amount, total_amount=total_amount,
+        subtotal=pricing["subtotal"], tax_amount=pricing["tax_amount"],
+        service_charge_amount=pricing["service_charge_amount"],
+        discount_amount=pricing["discount_amount"], total_amount=total_amount,
     )
     db.add(order)
     db.flush()
@@ -164,6 +196,7 @@ def get_my_order(
         )
 
     return _attach_display_fields(db, order)
+
 
 def list_orders_for_restaurant(db: Session, current_user: User, restaurant_id: uuid.UUID) -> list[Order]:
     assert_restaurant_access(db, current_user, restaurant_id)

@@ -8,9 +8,8 @@ from app.routers import (
     auth, hotels, bookings, service_requests, billing, audit,
     restaurants, reservations, orders, restaurant_billing, delivery, inventory,
     notifications, dashboard, reports, business_rules, ai_customer_assistant, ai_staff_assistant,
-    booking_import, media, newsletter,
+    booking_import, media, newsletter, delivery_checkout,
 )
-from app.routers import delivery_ai
 
 app = FastAPI(
     title="IHG Management Platform API",
@@ -47,7 +46,7 @@ app.include_router(ai_staff_assistant.router)
 app.include_router(booking_import.router)
 app.include_router(media.router)
 app.include_router(newsletter.router)
-app.include_router(delivery_ai.router)
+app.include_router(delivery_checkout.router)
 
 
 @app.get("/health")

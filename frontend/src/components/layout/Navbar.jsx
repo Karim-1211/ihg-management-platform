@@ -350,8 +350,12 @@ export default function Navbar() {
   ]
   const deliveryItems = [
     {
-      to: '/restaurants',
+      to: '/delivery',
       label: 'Order Food',
+    },
+    {
+      to: '/delivery/orders',
+      label: 'My Orders & Tracking',
     },
   ]
 
