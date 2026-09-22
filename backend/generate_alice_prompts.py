@@ -1,6 +1,7 @@
 """Pre-generates Alice's fixed conversational lines as static WAV files in
 the frontend's public folder, so they play instantly. Only dynamic content
-(recommendations) still calls Kokoro live. Safe to re-run.
+(recommendations, order status, answers) still calls Kokoro live. Safe to
+re-run.
 
 Run from backend/:
     python generate_alice_prompts.py
@@ -31,8 +32,7 @@ PROMPTS = {
     "alice-retry-checkout.wav": "I'm sorry, what date would you like to check out?",
     "alice-retry-guests.wav": "I didn't catch that — how many guests will be staying?",
 
-    # Dining concierge — first-activation introductions (intro + first
-    # question in a single clip, so there's no gap between them)
+    # Dining concierge — first-activation introductions
     "alice-dining-intro-reserve.wav": (
         "Hello, I'm Alice, your dining concierge. I'd be delighted to reserve a table for you. "
         "What date would you like to dine with us?"
@@ -58,6 +58,22 @@ PROMPTS = {
     "alice-retry-dining-date.wav": "I didn't quite catch that date. When would you like to dine with us?",
     "alice-retry-dining-time.wav": "I'm sorry, what time would you like?",
     "alice-retry-party-size.wav": "I didn't catch that — how many guests will be joining you?",
+
+    # Delivery concierge — first-activation introductions
+    "alice-delivery-intro-choose.wav": (
+        "Hello, I'm Alice, your delivery concierge. Tell me what you're in the mood for, "
+        "and I'll find the perfect dish on our menu."
+    ),
+    "alice-delivery-intro-track.wav": (
+        "Hello, I'm Alice, your delivery concierge. One moment while I check on your order."
+    ),
+    "alice-delivery-intro-question.wav": (
+        "Hello, I'm Alice, your delivery concierge. What would you like to know?"
+    ),
+
+    # Delivery concierge — follow-up lines
+    "alice-checking-order.wav": "One moment while I check on your order.",
+    "alice-ask-question.wav": "Of course — what would you like to know?",
 }
 
 

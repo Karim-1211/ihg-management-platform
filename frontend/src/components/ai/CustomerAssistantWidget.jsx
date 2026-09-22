@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate, useLocation } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import api from '../../services/api'
 import { useAssistant } from '../../context/AssistantContext'
 import { useAutoMic, narrateThenListen, streamAssistant } from '../../lib/aliceVoice'
@@ -44,19 +44,27 @@ const WELCOME_MESSAGE = {
 }
 
 const DINING_WELCOME = "Hello, I'm Alice, your dining concierge. I can reserve a table for you, or help you choose something delicious and have it delivered."
+const DELIVERY_WELCOME = "Hello, I'm Alice, your delivery concierge. I can help you choose something delicious, tell you exactly where your order is, or answer any other question."
+
+const SUBTITLES = { hotel: 'Your AI Concierge', dining: 'AI Dining Concierge', delivery: 'AI Delivery Concierge' }
 
 function isStaleDefaultWelcome(text) {
   return /guest assistant/i.test(text || '')
 }
 
+// Alice's role follows the page: delivery pages (menu, checkout, tracker,
+// orders) → delivery concierge; restaurant pages → dining concierge;
+// everywhere else → the hotel concierge.
+function pageKindFor(pathname) {
+  if (pathname.startsWith('/delivery')) return 'delivery'
+  if (pathname.startsWith('/restaurants')) return 'dining'
+  return 'hotel'
+}
+
 export default function CustomerAssistantWidget() {
   const { messages, setMessages, open, setOpen } = useAssistant()
-  const navigate = useNavigate()
   const location = useLocation()
-
-  // Alice changes role with the page: on restaurant and delivery pages she
-  // is the Dining Concierge; everywhere else she is the hotel concierge.
-  const isDiningPage = location.pathname.startsWith('/restaurants') || location.pathname.startsWith('/delivery')
+  const pageKind = pageKindFor(location.pathname)
 
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -94,10 +102,10 @@ export default function CustomerAssistantWidget() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Never carry a hotel conversation onto a restaurant page or vice versa.
+  // Never carry one kind of conversation onto a different kind of page.
   useEffect(() => {
     setMode('menu')
-  }, [isDiningPage])
+  }, [pageKind])
 
   useEffect(() => {
     if (open || teaserDismissed) return
@@ -177,6 +185,11 @@ export default function CustomerAssistantWidget() {
     }
   }
 
+  function openAndStart(which) {
+    openWidget()
+    startDining(which)
+  }
+
   function startAskQuestion() {
     setMode('chat')
   }
@@ -222,26 +235,41 @@ export default function CustomerAssistantWidget() {
   }
 
   const roomAllShown = [...roomFlow.primaryRooms, ...roomFlow.secondaryRooms]
-  const subtitle = isDiningPage ? 'AI Dining Concierge' : 'Your AI Concierge'
+  const menuButton = 'w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-[13px] font-semibold text-[#1F3A5F] hover:bg-slate-50'
 
   return (
     <>
       {!open && showTeaser && (
-        <div className="fixed bottom-24 right-6 z-[150] w-[270px] rounded-2xl bg-white p-4 shadow-[0_20px_48px_-8px_rgba(15,23,42,0.3)] ring-1 ring-slate-200/80">
+        <div className="fixed bottom-24 right-6 z-[150] w-[280px] rounded-2xl bg-white p-4 shadow-[0_20px_48px_-8px_rgba(15,23,42,0.3)] ring-1 ring-slate-200/80">
           <button type="button" onClick={dismissTeaser} aria-label="Dismiss" className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-slate-700 text-white shadow hover:bg-slate-900">
             <CloseIcon className="h-3 w-3" />
           </button>
-          {isDiningPage ? (
+
+          {pageKind === 'delivery' && (
+            <>
+              <p className="text-sm leading-6 text-slate-700">
+                Hi, I'm <span className="font-bold text-[#1F3A5F]">Alice</span> — hungry? I can help you choose, or tell you exactly where your order is.
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <button type="button" onClick={() => openAndStart('choose')} className="rounded-xl bg-[#FF2147] py-2 text-[11px] font-bold text-white hover:bg-[#dc1539]">Help me choose</button>
+                <button type="button" onClick={() => openAndStart('track')} className="rounded-xl bg-[#1F3A5F] py-2 text-[11px] font-bold text-white hover:bg-[#162f4d]">Track my order</button>
+              </div>
+            </>
+          )}
+
+          {pageKind === 'dining' && (
             <>
               <p className="text-sm leading-6 text-slate-700">
                 Hi, I'm <span className="font-bold text-[#1F3A5F]">Alice</span> — shall I reserve you a table, or bring something delicious to your door?
               </p>
               <div className="mt-3 grid grid-cols-2 gap-2">
-                <button type="button" onClick={() => { openWidget(); startDining('reserve') }} className="rounded-xl bg-[#FF2147] py-2 text-[11px] font-bold text-white hover:bg-[#dc1539]">Reserve a table</button>
-                <button type="button" onClick={() => { openWidget(); startDining('delivery') }} className="rounded-xl bg-[#1F3A5F] py-2 text-[11px] font-bold text-white hover:bg-[#162f4d]">Order delivery</button>
+                <button type="button" onClick={() => openAndStart('reserve')} className="rounded-xl bg-[#FF2147] py-2 text-[11px] font-bold text-white hover:bg-[#dc1539]">Reserve a table</button>
+                <button type="button" onClick={() => openAndStart('delivery')} className="rounded-xl bg-[#1F3A5F] py-2 text-[11px] font-bold text-white hover:bg-[#162f4d]">Order delivery</button>
               </div>
             </>
-          ) : (
+          )}
+
+          {pageKind === 'hotel' && (
             <>
               <p className="text-sm leading-6 text-slate-700">
                 Hi, I'm <span className="font-bold text-[#1F3A5F]">Alice</span> — need help finding a room, or a question about your stay?
@@ -274,7 +302,7 @@ export default function CustomerAssistantWidget() {
               </div>
               <div>
                 <p className="text-[13px] font-bold text-white">Alice</p>
-                <p className="text-[11px] text-white/50">{subtitle}</p>
+                <p className="text-[11px] text-white/50">{SUBTITLES[pageKind]}</p>
               </div>
             </div>
             <div className="flex items-center gap-1">
@@ -290,26 +318,28 @@ export default function CustomerAssistantWidget() {
           {mode === 'menu' && (
             <div className="flex-1 space-y-3 overflow-y-auto bg-slate-50/60 px-4 py-4">
               <div className="max-w-[90%] rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-[13.5px] leading-relaxed text-slate-700">
-                {isDiningPage ? DINING_WELCOME : (messages[0]?.content || WELCOME_MESSAGE.content)}
+                {pageKind === 'delivery' ? DELIVERY_WELCOME : pageKind === 'dining' ? DINING_WELCOME : (messages[0]?.content || WELCOME_MESSAGE.content)}
               </div>
 
-              {isDiningPage ? (
+              {pageKind === 'delivery' && (
                 <>
-                  <button type="button" onClick={() => startDining('reserve')} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-[13px] font-semibold text-[#1F3A5F] hover:bg-slate-50">
-                    🍽️ Reserve a table
-                  </button>
-                  <button type="button" onClick={() => startDining('delivery')} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-[13px] font-semibold text-[#1F3A5F] hover:bg-slate-50">
-                    🛵 Order delivery
-                  </button>
+                  <button type="button" onClick={() => startDining('choose')} className={menuButton}>✨ Ask Alice to choose</button>
+                  <button type="button" onClick={() => startDining('track')} className={menuButton}>🛵 Track an order</button>
+                  <button type="button" onClick={() => startDining('question')} className={menuButton}>💬 Have another question</button>
                 </>
-              ) : (
+              )}
+
+              {pageKind === 'dining' && (
                 <>
-                  <button type="button" onClick={startFindRoom} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-[13px] font-semibold text-[#1F3A5F] hover:bg-slate-50">
-                    🛏️ Find me a room
-                  </button>
-                  <button type="button" onClick={startAskQuestion} className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-left text-[13px] font-semibold text-[#1F3A5F] hover:bg-slate-50">
-                    💬 Ask a question
-                  </button>
+                  <button type="button" onClick={() => startDining('reserve')} className={menuButton}>🍽️ Reserve a table</button>
+                  <button type="button" onClick={() => startDining('delivery')} className={menuButton}>🛵 Order delivery</button>
+                </>
+              )}
+
+              {pageKind === 'hotel' && (
+                <>
+                  <button type="button" onClick={startFindRoom} className={menuButton}>🛏️ Find me a room</button>
+                  <button type="button" onClick={startAskQuestion} className={menuButton}>💬 Ask a question</button>
                   {messages.length > 1 && (
                     <button type="button" onClick={startAskQuestion} className="w-full text-center text-[12px] font-semibold text-slate-400 underline hover:text-slate-600">
                       Continue previous conversation
@@ -327,6 +357,7 @@ export default function CustomerAssistantWidget() {
               {dining && (
                 <DiningConcierge
                   compact
+                  variant={pageKind === 'delivery' ? 'delivery' : 'restaurant'}
                   restaurantId={dining.id}
                   restaurantName={dining.name}
                   menu={dining.menu}

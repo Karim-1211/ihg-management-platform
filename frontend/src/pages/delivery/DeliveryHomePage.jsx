@@ -21,6 +21,14 @@ const MOTIONS = ['heroZoomIn', 'heroPanLeft', 'heroPanRight', 'heroZoomOut']
 const DIET_FILTERS = ['Vegetarian', 'Vegan', 'Gluten-Free', 'Dairy-Free']
 const TAG_ABBR = { 'Gluten-Free': 'GF', 'Dairy-Free': 'DF', Vegetarian: 'VG', Vegan: 'V', 'Contains Nuts': 'N', Spicy: '🌶' }
 
+const CATEGORY_NOTES = {
+  Starters: 'Small plates to open the table — meant for sharing, or not.',
+  Mains: 'Cooked to order. Please allow a little time for the charcoal dishes.',
+  Desserts: 'Made in-house each morning.',
+  Drinks: 'Chilled, brewed or poured to order.',
+  'Happy Hour': 'Daily, 5pm – 7pm.',
+}
+
 function Icon({ name, size = 18 }) {
   const c = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }
   const paths = {
@@ -69,50 +77,77 @@ function CinematicHero({ images }) {
   )
 }
 
-function QuantityControl({ quantity, onChange, name, size = 'md' }) {
+function QuantityControl({ quantity, onChange, name, size = 'md', tone = 'light' }) {
   const box = size === 'sm' ? 'h-7 w-7 text-sm' : 'h-9 w-9 text-base'
+  const dark = tone === 'dark'
   if (!quantity) {
     return (
-      <button type="button" onClick={() => onChange(1)} className="rounded-full bg-[#1F3A5F] px-5 py-2 text-xs font-bold uppercase tracking-[0.1em] text-white transition hover:bg-[#FF2147]">
+      <button
+        type="button"
+        onClick={() => onChange(1)}
+        className={`rounded-full px-5 py-2 text-[11px] font-bold uppercase tracking-[0.12em] transition ${dark ? 'bg-[#FF2147] text-white hover:bg-[#dc1539]' : 'border border-[#1F3A5F]/25 text-[#1F3A5F] hover:border-[#FF2147] hover:bg-[#FF2147] hover:text-white'}`}
+      >
         Add +
       </button>
     )
   }
   return (
     <div className="flex items-center gap-2.5">
-      <button type="button" aria-label={`Remove one ${name}`} onClick={() => onChange(quantity - 1)} className={`flex ${box} items-center justify-center rounded-full bg-slate-100 font-bold text-[#1F3A5F] transition hover:bg-slate-200`}>−</button>
-      <span className="w-5 text-center text-sm font-bold text-[#1F3A5F]">{quantity}</span>
+      <button type="button" aria-label={`Remove one ${name}`} onClick={() => onChange(quantity - 1)} className={`flex ${box} items-center justify-center rounded-full font-bold transition ${dark ? 'bg-white/10 text-white hover:bg-white/20' : 'bg-slate-100 text-[#1F3A5F] hover:bg-slate-200'}`}>−</button>
+      <span className={`w-5 text-center text-sm font-bold ${dark ? 'text-white' : 'text-[#1F3A5F]'}`}>{quantity}</span>
       <button type="button" aria-label={`Add one ${name}`} onClick={() => onChange(quantity + 1)} className={`flex ${box} items-center justify-center rounded-full bg-[#FF2147] font-bold text-white transition hover:bg-[#dc1539]`}>+</button>
     </div>
   )
 }
 
-function DishCard({ item, categoryName, quantity, onChange }) {
+function TagList({ tags }) {
+  if (!tags?.length) return null
   return (
-    <article className={`flex h-full flex-col overflow-hidden rounded-2xl bg-white ring-1 transition ${quantity ? 'shadow-[0_18px_40px_-24px_rgba(255,33,71,0.55)] ring-[#FF2147]/40' : 'ring-slate-200/80 hover:shadow-lg hover:ring-[#1F3A5F]/25'}`}>
-      {item.display_image_url && <img src={item.display_image_url} alt={item.name} loading="lazy" className="h-44 w-full object-cover" />}
-      <div className="flex flex-1 flex-col p-6">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            {categoryName && <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">{categoryName}</p>}
-            <h3 className="mt-1 font-serif text-[22px] leading-snug text-[#1F3A5F]">{item.name}</h3>
-          </div>
+    <div className="mt-2.5 flex flex-wrap gap-1.5">
+      {tags.map((tag) => (
+        <span key={tag} title={tag} className="rounded-sm border border-[#1F3A5F]/15 px-1.5 py-0.5 text-[9px] font-bold tracking-[0.08em] text-slate-500">{TAG_ABBR[tag] || tag}</span>
+      ))}
+    </div>
+  )
+}
+
+// A single line of the menu — reads like a printed bill of fare, with the
+// add control on the same line so ordering stays one tap away.
+function MenuRow({ item, categoryName, quantity, onChange }) {
+  return (
+    <div className={`relative flex flex-col gap-4 px-6 py-6 transition sm:flex-row sm:items-start sm:gap-8 sm:px-10 ${quantity ? 'bg-[#FF2147]/[0.035]' : 'hover:bg-[#1F3A5F]/[0.02]'}`}>
+      {quantity > 0 && <span className="absolute inset-y-4 left-0 w-[3px] rounded-r bg-[#FF2147]" />}
+      {item.display_image_url && <img src={item.display_image_url} alt={item.name} loading="lazy" className="h-20 w-20 shrink-0 rounded-xl object-cover" />}
+      <div className="min-w-0 flex-1">
+        {categoryName && <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-400">{categoryName}</p>}
+        <div className="flex items-baseline gap-2">
+          <h4 className="font-serif text-[21px] leading-snug text-[#1F3A5F]">{item.name}</h4>
           {item.is_signature && (
-            <span className="mt-1 shrink-0 rounded-full bg-[#FF2147]/10 px-2.5 py-1 text-[9px] font-bold uppercase tracking-[0.14em] text-[#FF2147]">Signature</span>
+            <span className="shrink-0 rounded-full bg-[#FF2147]/10 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.14em] text-[#FF2147]">Signature</span>
           )}
+          <span className="mx-1 h-px flex-1 translate-y-[-4px] border-b border-dotted border-[#1F3A5F]/30" />
+          <span className="shrink-0 font-serif text-[21px] text-[#1F3A5F]">{Number(item.price).toFixed(2)}</span>
         </div>
-        {item.description && <p className="mt-2 flex-1 text-[14.5px] leading-7 text-slate-500">{item.description}</p>}
-        {(item.dietary_tags || []).length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {item.dietary_tags.map((tag) => (
-              <span key={tag} title={tag} className="rounded-sm border border-[#1F3A5F]/15 px-1.5 py-0.5 text-[9px] font-bold tracking-[0.08em] text-slate-500">{TAG_ABBR[tag] || tag}</span>
-            ))}
-          </div>
-        )}
-        <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4">
-          <span className="font-serif text-2xl text-[#1F3A5F]">{formatMoney(item.price)}</span>
-          <QuantityControl quantity={quantity} onChange={onChange} name={item.name} />
-        </div>
+        {item.description && <p className="mt-1.5 max-w-xl text-[14.5px] leading-7 text-slate-500">{item.description}</p>}
+        <TagList tags={item.dietary_tags} />
+      </div>
+      <div className="shrink-0 sm:pt-1">
+        <QuantityControl quantity={quantity} onChange={onChange} name={item.name} />
+      </div>
+    </div>
+  )
+}
+
+function SignatureCard({ item, quantity, onChange }) {
+  return (
+    <article className="relative flex flex-col overflow-hidden rounded-2xl bg-[#0E2036] p-7 text-white ring-1 ring-white/10">
+      <div className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-[#FF2147]/15 blur-2xl" />
+      <p className="relative text-[10px] font-bold uppercase tracking-[0.22em] text-[#FF2147]">Signature · {item.categoryName}</p>
+      <h3 className="relative mt-3 font-serif text-[26px] leading-snug">{item.name}</h3>
+      {item.description && <p className="relative mt-2 flex-1 text-sm leading-6 text-white/60">{item.description}</p>}
+      <div className="relative mt-6 flex items-center justify-between border-t border-white/10 pt-5">
+        <span className="font-serif text-2xl">{formatMoney(item.price)}</span>
+        <QuantityControl quantity={quantity} onChange={onChange} name={item.name} tone="dark" />
       </div>
     </article>
   )
@@ -248,6 +283,11 @@ export default function DeliveryHomePage() {
     [categories]
   )
 
+  const signatures = useMemo(
+    () => categories.flatMap((c) => c.items.filter((i) => i.is_signature).map((i) => ({ ...i, categoryName: c.name }))).slice(0, 4),
+    [categories]
+  )
+
   const query = search.trim().toLowerCase()
 
   // A search looks across the whole menu; otherwise the chosen tab applies.
@@ -273,6 +313,7 @@ export default function DeliveryHomePage() {
   const count = lines.reduce((n, l) => n + l.quantity, 0)
   const subtotal = lines.reduce((sum, l) => sum + Number(l.price) * l.quantity, 0)
   const otherKitchenBasket = cart.restaurantId && cart.restaurantId !== activeId && cartCount(cart) > 0
+  const showSignatures = !query && category === 'all' && !diet && signatures.length > 0
 
   function changeQty(itemId, quantity) {
     setItemQuantity(activeId, itemId, quantity)
@@ -283,7 +324,7 @@ export default function DeliveryHomePage() {
   }
 
   function askAlice() {
-    setIntent('delivery')
+    setIntent('choose')
     window.setTimeout(() => scrollTo('dining-concierge'), 80)
   }
 
@@ -291,13 +332,15 @@ export default function DeliveryHomePage() {
     navigate('/delivery/checkout')
   }
 
+  const heroSecondary = 'flex items-center gap-2 rounded-xl border border-white/40 bg-white/10 px-6 py-3 text-xs font-bold uppercase tracking-[0.12em] text-white backdrop-blur-sm transition hover:bg-white hover:text-[#1F3A5F]'
+
   return (
     <AppLayout>
       <div className="relative left-1/2 -ml-[50vw] w-screen -mt-6 lg:-mt-8">
 
         {/* Shorter than the hotel and restaurant heroes on purpose: on a page
             whose job is ordering, the menu should begin within one scroll. */}
-        <section className="relative h-[72vh] min-h-[560px] bg-[#0E2036]">
+        <section className="relative h-[72vh] min-h-[580px] bg-[#0E2036]">
           <CinematicHero images={HERO_IMAGES} />
           <div className="absolute inset-0 bg-gradient-to-b from-black/60 via-black/45 to-black/75" />
           <div className="relative flex h-full flex-col items-center justify-center px-6 text-center">
@@ -319,13 +362,13 @@ export default function DeliveryHomePage() {
               <button type="button" onClick={() => scrollTo('the-menu')} className="rounded-xl bg-[#FF2147] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#dc1539]">Search</button>
             </div>
 
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-xs font-bold uppercase tracking-[0.16em] text-white/75">
-              <button type="button" onClick={askAlice} className="flex items-center gap-2 underline-offset-4 hover:text-white hover:underline">
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+              <button type="button" onClick={askAlice} className={heroSecondary}>
                 <Icon name="sparkle" size={15} /> Ask Alice to choose
               </button>
-              {user?.role === 'CUSTOMER' && (
-                <Link to="/delivery/orders" className="underline-offset-4 hover:text-white hover:underline">Track an order</Link>
-              )}
+              <Link to="/delivery/orders" className={heroSecondary}>
+                <Icon name="scooter" size={15} /> Track an order
+              </Link>
             </div>
             <span className="absolute bottom-7 animate-bounce text-white/50"><Icon name="arrowDown" size={20} /></span>
           </div>
@@ -343,11 +386,11 @@ export default function DeliveryHomePage() {
           </section>
         )}
 
-        <section id="the-menu" className="scroll-mt-[72px] bg-[#F5F2ED]">
-          <div className="sticky top-[72px] z-30 border-b border-[#1F3A5F]/10 bg-[#F5F2ED]/95 backdrop-blur">
+        <section id="the-menu" className="scroll-mt-[72px] bg-[#F0EBE3]">
+          <div className="sticky top-[72px] z-30 border-b border-[#1F3A5F]/10 bg-[#F0EBE3]/95 backdrop-blur">
             <div className={`mx-auto ${CONTENT_MAX_W} flex flex-col gap-3 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8`}>
               <div className="-mx-1 flex gap-1 overflow-x-auto pb-1 lg:pb-0">
-                {[{ id: 'all', name: 'All' }, ...categories].map((c) => (
+                {[{ id: 'all', name: 'Full menu' }, ...categories].map((c) => (
                   <button
                     key={c.id}
                     type="button"
@@ -376,7 +419,7 @@ export default function DeliveryHomePage() {
             </div>
           </div>
 
-          <div className={`mx-auto ${CONTENT_MAX_W} px-4 py-12 sm:px-6 lg:px-8`}>
+          <div className={`mx-auto ${CONTENT_MAX_W} px-4 py-14 sm:px-6 lg:px-8`}>
             {notice && (
               <div className="mb-8 flex items-start justify-between gap-4 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800">
                 <span>{notice}</span>
@@ -397,10 +440,26 @@ export default function DeliveryHomePage() {
             )}
 
             <div className="grid gap-10 lg:grid-cols-[1fr_360px]">
-              <div>
+              <div className="min-w-0">
                 {(loading || menuLoading) && (
-                  <div className="grid gap-5 sm:grid-cols-2">
-                    {[1, 2, 3, 4, 5, 6].map((i) => <div key={i} className="h-60 animate-pulse rounded-2xl bg-white/70" />)}
+                  <div className="space-y-4">
+                    {[1, 2, 3, 4, 5].map((i) => <div key={i} className="h-24 animate-pulse rounded-xl bg-white/70" />)}
+                  </div>
+                )}
+
+                {!loading && !menuLoading && showSignatures && (
+                  <div className="mb-14">
+                    <div className="mb-6 flex items-end justify-between gap-4">
+                      <div>
+                        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-[#FF2147]">From the chef</p>
+                        <h2 className="mt-2 font-serif text-4xl text-[#1F3A5F]">Signatures worth the wait.</h2>
+                      </div>
+                    </div>
+                    <div className="grid gap-5 sm:grid-cols-2">
+                      {signatures.map((item) => (
+                        <SignatureCard key={item.id} item={item} quantity={cartItems[item.id] || 0} onChange={(q) => changeQty(item.id, q)} />
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -413,25 +472,44 @@ export default function DeliveryHomePage() {
                 )}
 
                 {!loading && !menuLoading && sections.map((section) => (
-                  <div key={section.id} className="mb-14 last:mb-0">
-                    <div className="mb-6 flex items-center gap-4">
-                      <h2 className="font-serif text-3xl text-[#1F3A5F]">{section.name}</h2>
-                      <span className="h-px flex-1 bg-[#1F3A5F]/15" />
-                      <span className="text-xs font-semibold text-slate-400">{section.items.length} dish{section.items.length === 1 ? '' : 'es'}</span>
-                    </div>
-                    <div className="grid gap-5 sm:grid-cols-2">
-                      {section.items.map((item) => (
-                        <DishCard
-                          key={item.id}
-                          item={item}
-                          categoryName={query ? section.name : null}
-                          quantity={cartItems[item.id] || 0}
-                          onChange={(q) => changeQty(item.id, q)}
-                        />
-                      ))}
+                  <div key={section.id} className="relative mb-10 last:mb-0">
+                    {/* Each section is presented as a printed menu card. */}
+                    <div className="relative overflow-hidden rounded-sm bg-[#FCFBF7] shadow-[0_18px_50px_-24px_rgba(15,23,42,0.3)] ring-1 ring-[#1F3A5F]/10">
+                      <div className="pointer-events-none absolute inset-3 rounded-sm border border-[#1F3A5F]/10" />
+                      <div className="relative px-6 pt-12 text-center">
+                        <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-[#FF2147]">{query ? 'Search results' : 'Bill of fare'}</p>
+                        <h3 className="mt-3 font-serif text-4xl tracking-tight text-[#1F3A5F] sm:text-5xl">{section.name}</h3>
+                        <div className="mx-auto mt-4 flex max-w-[220px] items-center gap-3">
+                          <span className="h-px flex-1 bg-[#1F3A5F]/20" />
+                          <span className="h-1.5 w-1.5 rotate-45 bg-[#FF2147]" />
+                          <span className="h-px flex-1 bg-[#1F3A5F]/20" />
+                        </div>
+                        {CATEGORY_NOTES[section.name] && !query && (
+                          <p className="mx-auto mt-4 max-w-md font-serif text-base italic leading-7 text-slate-500">{CATEGORY_NOTES[section.name]}</p>
+                        )}
+                      </div>
+                      <div className="relative mt-8 divide-y divide-[#1F3A5F]/10 pb-6">
+                        {section.items.map((item) => (
+                          <MenuRow
+                            key={item.id}
+                            item={item}
+                            categoryName={query ? section.name : null}
+                            quantity={cartItems[item.id] || 0}
+                            onChange={(q) => changeQty(item.id, q)}
+                          />
+                        ))}
+                      </div>
                     </div>
                   </div>
                 ))}
+
+                {!loading && !menuLoading && sections.length > 0 && (
+                  <p className="mt-10 text-center text-[11px] leading-6 tracking-wide text-slate-500">
+                    GF Gluten-Free &nbsp;·&nbsp; DF Dairy-Free &nbsp;·&nbsp; VG Vegetarian &nbsp;·&nbsp; V Vegan &nbsp;·&nbsp; N Contains Nuts &nbsp;·&nbsp; 🌶 Spicy
+                    <br />
+                    <span className="font-serif text-sm italic">Please tell us about any allergy in your rider notes — we cook to order.</span>
+                  </p>
+                )}
               </div>
 
               <aside className="lg:sticky lg:top-[160px] lg:self-start">
@@ -476,12 +554,9 @@ export default function DeliveryHomePage() {
 
         <section id="dining-concierge" className="scroll-mt-[72px] bg-[#F5F2ED] px-4 py-24 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-[1100px]">
-            <div className="mb-10 text-center">
-              <p className="text-sm font-extrabold uppercase tracking-[0.2em] text-[#FF2147]">Not sure what to order?</p>
-              <h2 className="mt-3 font-serif text-4xl text-[#1F3A5F] sm:text-5xl">Let Alice choose with you.</h2>
-            </div>
             {active && (
               <DiningConcierge
+                variant="delivery"
                 restaurantId={active.id}
                 restaurantName={active.name}
                 menu={menu}

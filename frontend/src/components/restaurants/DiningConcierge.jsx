@@ -4,11 +4,17 @@ import api from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import { useAutoMic, speakThenListen, narrateThenListen, streamAssistant } from '../../lib/aliceVoice'
 import { addItemsToCart } from '../../lib/deliveryCart'
+import { deliveryStepIndex, isFinished, statusLabel, statusPillClass, formatDateTime } from '../../lib/deliveryStatus'
 
 const LINES = {
   greeting: { file: '/audio/alice-dining-greeting.wav', text: "Hello, I'm Alice. I can reserve a table for you, or help you find something delicious to eat. Which would you like?" },
   introReserve: { file: '/audio/alice-dining-intro-reserve.wav', text: "Hello, I'm Alice, your dining concierge. I'd be delighted to reserve a table for you. What date would you like to dine with us?" },
   introOrder: { file: '/audio/alice-dining-intro-order.wav', text: "Hello, I'm Alice, your dining concierge. I'd love to help you choose something delicious. Tell me what you're in the mood for, and I'll find it on our menu." },
+  introDeliveryChoose: { file: '/audio/alice-delivery-intro-choose.wav', text: "Hello, I'm Alice, your delivery concierge. Tell me what you're in the mood for, and I'll find the perfect dish on our menu." },
+  introDeliveryTrack: { file: '/audio/alice-delivery-intro-track.wav', text: "Hello, I'm Alice, your delivery concierge. One moment while I check on your order." },
+  introDeliveryQuestion: { file: '/audio/alice-delivery-intro-question.wav', text: "Hello, I'm Alice, your delivery concierge. What would you like to know?" },
+  checkingOrder: { file: '/audio/alice-checking-order.wav', text: 'One moment while I check on your order.' },
+  askQuestion: { file: '/audio/alice-ask-question.wav', text: 'Of course — what would you like to know?' },
   askDate: { file: '/audio/alice-ask-dining-date.wav', text: 'Lovely. What date would you like to dine with us?' },
   askTime: { file: '/audio/alice-ask-dining-time.wav', text: 'And what time shall I look for?' },
   askParty: { file: '/audio/alice-ask-party-size.wav', text: 'And how many guests will be joining you?' },
@@ -20,11 +26,22 @@ const LINES = {
   retryParty: { file: '/audio/alice-retry-party-size.wav', text: "I didn't catch that — how many guests will be joining you?" },
 }
 
+const DELIVERY_GREETING = "Hello, I'm Alice, your delivery concierge. I can help you choose something delicious, tell you exactly where your order is, or answer any other question."
+
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']
 const NUMBER_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 }
 // Speech recognition regularly mishears small numbers as these words —
 // "four guests" comes back as "for guests", "two" as "to".
 const NUMBER_HOMOPHONES = { won: 1, to: 2, too: 2, tree: 3, for: 4, fore: 4, ate: 8, sex: 6, nun: 9 }
+
+const ORDER_PHRASES = [
+  'has been received and is waiting for the kitchen to confirm it',
+  'has been confirmed by the kitchen',
+  'is being prepared right now',
+  'is ready and waiting for its rider',
+  'is on its way to you',
+  'has been delivered',
+]
 
 function guessYear(monthIndex, day) {
   const now = new Date()
@@ -151,6 +168,43 @@ function prettyDateTime(dateStr, timeStr) {
   }
 }
 
+// Order numbers are read aloud as their last four characters, spaced out,
+// so the voice says "ending in 8 4 A E" instead of mangling "ORDED5984AE".
+function orderSentence(order, spoken) {
+  const index = deliveryStepIndex(order)
+  const ref = spoken
+    ? `ending in ${String(order.order_number || '').slice(-4).split('').join(' ')}`
+    : order.order_number
+  if (index === -1) return `Your order ${ref} was cancelled.`
+  let sentence = `Your order ${ref} ${ORDER_PHRASES[index]}.`
+  if (order.delivery_driver_name && index >= 3 && index < 5) {
+    sentence += ` Your rider is ${order.delivery_driver_name.split(' ')[0]}.`
+  }
+  return sentence
+}
+
+// Order status comes straight from the guest's real orders — never from
+// the language model — so it is instant and cannot be wrong.
+function describeOrders(orders, spoken) {
+  const active = orders.filter((o) => !isFinished(o))
+  if (active.length === 1) {
+    return { text: `${orderSentence(active[0], spoken)} You can follow every step on the live tracker.`, cards: active }
+  }
+  if (active.length > 1) {
+    return {
+      text: `You have ${active.length} orders on the way. ${active.slice(0, 3).map((o) => orderSentence(o, spoken)).join(' ')}`,
+      cards: active.slice(0, 3),
+    }
+  }
+  if (orders.length) {
+    return {
+      text: `You don't have anything on the way right now. ${orderSentence(orders[0], spoken)} Would you like me to help you choose something new?`,
+      cards: [orders[0]],
+    }
+  }
+  return { text: "You haven't placed a delivery order yet. Would you like me to help you choose something?", cards: [] }
+}
+
 // Finds which REAL menu items Alice actually named in her reply, by
 // scanning the live menu — so "add it" can only ever add a dish that
 // exists, never one the model invented.
@@ -198,7 +252,11 @@ export default function DiningConcierge({
   onIntentHandled,
   compact = false,
   onBeforeNavigate,
+  variant = 'restaurant',
 }) {
+  const isDelivery = variant === 'delivery'
+  const greetingText = isDelivery ? DELIVERY_GREETING : LINES.greeting.text
+
   const { user } = useAuth()
   const navigate = useNavigate()
   const audioRef = useRef(null)
@@ -210,18 +268,24 @@ export default function DiningConcierge({
   const suggestedRef = useRef([])
   const menuRef = useRef([])
   const cartRef = useRef({})
+  const historyRef = useRef([])
+  // Incremented whenever a new request starts or the guest starts over; a
+  // result that arrives for an older run is discarded instead of shown.
+  const runRef = useRef(0)
 
   const [voiceEnabled, setVoiceEnabled] = useState(true)
   const [step, setStep] = useState('mode')
-  const [orderMode, setOrderMode] = useState('dine')
+  const [orderMode, setOrderMode] = useState(isDelivery ? 'delivery' : 'dine')
   const [date, setDate] = useState('')
   const [time, setTime] = useState('')
   const [partySize, setPartySize] = useState(2)
   const [cravings, setCravings] = useState('')
+  const [question, setQuestion] = useState('')
   const [tables, setTables] = useState([])
+  const [tracked, setTracked] = useState([])
   const [cart, setCart] = useState({})
   const [suggested, setSuggested] = useState([])
-  const [log, setLog] = useState([{ from: 'alice', text: LINES.greeting.text }])
+  const [log, setLog] = useState([{ from: 'alice', text: greetingText }])
   const [replyText, setReplyText] = useState('')
   const [streaming, setStreaming] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -237,9 +301,6 @@ export default function DiningConcierge({
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight }, [log, replyText])
   useEffect(() => () => { audioRef.current?.pause(); window.speechSynthesis?.cancel(); mic.stop() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Driven by CTAs ("Reserve a table", "Order delivery") and by ?intent= in
-  // the URL. The guest's click satisfies the browser's user-interaction
-  // rule, so Alice's voice works from the very first line.
   // Deferred by one tick and cancelled on cleanup. React's development mode
   // runs mount effects twice; without this, a widget that mounts with an
   // intent already set would start Alice's introduction twice over.
@@ -247,7 +308,10 @@ export default function DiningConcierge({
     if (!intent) return undefined
     const timer = window.setTimeout(() => {
       if (intent === 'reserve') chooseReserve()
-      if (intent === 'order' || intent === 'delivery') chooseOrder(null, intent === 'delivery' ? 'delivery' : 'dine')
+      else if (intent === 'order') chooseOrder(null, 'dine')
+      else if (intent === 'delivery' || intent === 'choose') chooseOrder(null, 'delivery')
+      else if (intent === 'track') startTrack()
+      else if (intent === 'question') startQuestion()
       onIntentHandled?.()
     }, 0)
     return () => window.clearTimeout(timer)
@@ -257,8 +321,23 @@ export default function DiningConcierge({
   const isCustomer = user?.role === 'CUSTOMER'
   const today = new Date().toISOString().slice(0, 10)
 
-  function speakLine(line, then = () => mic.start()) {
-    speakThenListen(line.file, line.text, audioRef, voiceEnabled, then)
+  // Resolves only when the line has FINISHED playing naturally. If the line
+  // is cancelled or replaced, it never resolves — so nothing waiting on it
+  // can ever speak over, or open the mic during, whatever replaced it.
+  function speakAndWait(line) {
+    return new Promise((resolve) => {
+      speakThenListen(line.file, line.text, audioRef, voiceEnabled, resolve)
+    })
+  }
+
+  function speakLine(line) {
+    speakAndWait(line).then(() => mic.start())
+  }
+
+  function stopAll() {
+    audioRef.current?.pause()
+    window.speechSynthesis?.cancel()
+    mic.stop()
   }
 
   function say(lineKey, nextStep) {
@@ -269,35 +348,126 @@ export default function DiningConcierge({
     speakLine(line)
   }
 
-  // On first activation Alice introduces herself and asks the first
-  // question in a single clip; after that she goes straight to the point.
+  // On first activation Alice introduces herself in the same clip as her
+  // first question; after that she goes straight to the point.
   function begin(userText, introKey, followUpKey, nextStep) {
     mic.stop()
+    runRef.current += 1
     const first = !introducedRef.current
     introducedRef.current = true
+    setError('')
     setStep(nextStep)
     const line = LINES[first ? introKey : followUpKey]
     setLog((l) => [...(first ? [] : l), { from: 'user', text: userText }, { from: 'alice', text: line.text }])
-    speakLine(line)
+    return speakAndWait(line)
   }
 
   function chooseReserve(heard) {
-    begin(heard || 'Reserve a table', 'introReserve', 'askDate', 'date')
+    begin(heard || 'Reserve a table', 'introReserve', 'askDate', 'date').then(() => mic.start())
   }
 
   function chooseOrder(heard, mode = 'dine') {
     setOrderMode(mode)
-    begin(heard || (mode === 'delivery' ? 'Order for delivery' : 'Help me choose a dish'), 'introOrder', 'askCravings', 'cravings')
+    const intro = isDelivery ? 'introDeliveryChoose' : 'introOrder'
+    const label = heard || (isDelivery ? 'Help me choose' : mode === 'delivery' ? 'Order for delivery' : 'Help me choose a dish')
+    begin(label, intro, 'askCravings', 'cravings').then(() => mic.start())
+  }
+
+  function startQuestion(heard) {
+    begin(heard || 'I have another question', 'introDeliveryQuestion', 'askQuestion', 'question').then(() => mic.start())
+  }
+
+  async function startTrack(heard) {
+    setTracked([])
+    const spoken = begin(heard || 'Track my order', 'introDeliveryTrack', 'checkingOrder', 'tracking')
+    const run = runRef.current
+
+    let orders
+    try {
+      const res = await api.get('/orders/my')
+      orders = (Array.isArray(res.data) ? res.data : []).filter((o) => o.order_type === 'DELIVERY')
+    } catch {
+      await spoken
+      if (run !== runRef.current) return
+      const message = "I couldn't reach your orders just now. Please try again in a moment."
+      setStep('tracked')
+      setLog((l) => [...l, { from: 'alice', text: message }])
+      narrateThenListen(message, audioRef, voiceEnabled, () => mic.start())
+      return
+    }
+    if (run !== runRef.current) return
+
+    const shown = describeOrders(orders, false)
+    const said = describeOrders(orders, true)
+    setTracked(shown.cards)
+
+    await spoken
+    if (run !== runRef.current) return
+    setStep('tracked')
+    setLog((l) => [...l, { from: 'alice', text: shown.text }])
+    narrateThenListen(said.text, audioRef, voiceEnabled, () => mic.start())
+  }
+
+  async function askQuestion(text) {
+    // Anything still being said is stopped first, so the answer can never
+    // overlap an unfinished line.
+    stopAll()
+    runRef.current += 1
+    const run = runRef.current
+    setError('')
+    setStep('answering')
+    setLog((l) => [...l, { from: 'user', text }])
+    replyRef.current = ''
+    setReplyText('')
+    setStreaming(true)
+
+    await streamAssistant({
+      message: text,
+      conversationHistory: historyRef.current.slice(-8),
+      onDelta: (d) => {
+        if (run !== runRef.current) return
+        replyRef.current += d
+        setReplyText(replyRef.current)
+      },
+      onDone: () => {
+        if (run !== runRef.current) return
+        const final = replyRef.current
+        setStreaming(false)
+        setReplyText('')
+        historyRef.current = [...historyRef.current, { role: 'user', content: text }, { role: 'assistant', content: final }]
+        setLog((l) => [...l, { from: 'alice', text: final }])
+        setStep('question')
+        narrateThenListen(final, audioRef, voiceEnabled, () => mic.start())
+      },
+      onError: (m) => {
+        if (run !== runRef.current) return
+        setStreaming(false)
+        setStep('question')
+        setError(m)
+      },
+    })
+  }
+
+  function routeDeliveryIntent(transcript) {
+    const t = transcript.toLowerCase()
+    if (/(track|where|status|arriv|rider|how long|delivered)/.test(t)) { startTrack(transcript); return }
+    if (/(choose|hungry|recommend|suggest|eat|food|dish|menu|something to)/.test(t)) { chooseOrder(transcript, 'delivery'); return }
+    askQuestion(transcript)
   }
 
   function handleVoice(transcript) {
     if (!transcript) return
     const s = stepRef.current
 
-    if (s === 'mode') {
+    if (s === 'mode' || s === 'tracked') {
+      if (isDelivery) { setLog((l) => l); routeDeliveryIntent(transcript); return }
       if (/\b(table|reserve|reservation|book|booking)\b/i.test(transcript)) { chooseReserve(transcript); return }
       if (/\b(deliver|delivery)\b/i.test(transcript)) { chooseOrder(transcript, 'delivery'); return }
       if (/\b(food|eat|order|menu|hungry|dish|dinner|lunch)\b/i.test(transcript)) { chooseOrder(transcript, 'dine'); return }
+      return
+    }
+    if (s === 'question') {
+      askQuestion(transcript)
       return
     }
     if (s === 'date') {
@@ -395,12 +565,6 @@ export default function DiningConcierge({
     cartRef.current = next
   }
 
-  function stopAll() {
-    audioRef.current?.pause()
-    window.speechSynthesis?.cancel()
-    mic.stop()
-  }
-
   // Alice's picks go into the shared delivery basket, so they carry
   // straight through to checkout — and survive the sign-in step.
   function goToOrder() {
@@ -420,13 +584,19 @@ export default function DiningConcierge({
     }, 1200)
   }
 
+  function openTracker(orderId) {
+    stopAll()
+    onBeforeNavigate?.()
+    navigate(`/delivery/orders/${orderId}`)
+  }
+
   function viewFullMenu() {
     const el = document.getElementById('the-menu')
     if (el) {
       el.scrollIntoView({ behavior: 'smooth' })
     } else {
       onBeforeNavigate?.()
-      navigate('/restaurants')
+      navigate(isDelivery ? '/delivery' : '/restaurants')
     }
   }
 
@@ -445,19 +615,21 @@ export default function DiningConcierge({
   // bookable, with no model latency and no invented tables.
   async function findTables(party) {
     mic.stop()
+    runRef.current += 1
+    const run = runRef.current
     setError('')
     setStep('searching')
     setLog((l) => [...l, { from: 'alice', text: LINES.checkingTables.text }])
-    speakLine(LINES.checkingTables, () => {})
+    const lineDone = speakAndWait(LINES.checkingTables)
     setBusy(true)
     try {
       const res = await api.get(`/restaurants/${restaurantId}/tables/available`, {
         params: { reservation_start: `${date}T${time}:00`, party_size: party },
       })
+      if (run !== runRef.current) return
       const found = Array.isArray(res.data) ? res.data : []
       setTables(found)
       tablesRef.current = found
-      setStep('tables')
 
       const when = prettyDateTime(date, time)
       const spoken = found.length === 0
@@ -466,9 +638,13 @@ export default function DiningConcierge({
           ? `Good news — table ${found[0].table_number} is free on ${when}, seating up to ${found[0].capacity}. Shall I take you through to reserve it?`
           : `I found ${found.length} tables free on ${when}. ${found.slice(0, 3).map((tb) => `Table ${tb.table_number} seats ${tb.capacity}`).join(', ')}. Which would you prefer?`
 
+      await lineDone
+      if (run !== runRef.current) return
+      setStep('tables')
       setLog((l) => [...l, { from: 'alice', text: spoken }])
       narrateThenListen(spoken, audioRef, voiceEnabled, () => mic.start())
     } catch (err) {
+      if (run !== runRef.current) return
       const message = err.response?.data?.detail || "I couldn't check availability just now. Please try again in a moment."
       setError(message)
       setStep('party')
@@ -480,19 +656,26 @@ export default function DiningConcierge({
 
   async function askMenu(text) {
     mic.stop()
+    runRef.current += 1
+    const run = runRef.current
     setError('')
     setStep('menuSearching')
     setLog((l) => [...l, { from: 'user', text }, { from: 'alice', text: LINES.checkingMenu.text }])
-    speakLine(LINES.checkingMenu, () => {})
+    const lineDone = speakAndWait(LINES.checkingMenu)
 
     replyRef.current = ''
     setReplyText('')
     setStreaming(true)
 
     await streamAssistant({
-      message: `I'm dining with ${restaurantName} (restaurant_id: ${restaurantId}). I'm in the mood for: ${text}. Please recommend two or three dishes from the menu.`,
-      onDelta: (d) => { replyRef.current += d; setReplyText(replyRef.current) },
-      onDone: () => {
+      message: `I'm ordering from ${restaurantName} (restaurant_id: ${restaurantId}). I'm in the mood for: ${text}. Please recommend two or three dishes from the menu.`,
+      onDelta: (d) => {
+        if (run !== runRef.current) return
+        replyRef.current += d
+        setReplyText(replyRef.current)
+      },
+      onDone: async () => {
+        if (run !== runRef.current) return
         const final = replyRef.current
         setStreaming(false)
         setReplyText('')
@@ -502,19 +685,29 @@ export default function DiningConcierge({
         setSuggested(mentioned)
         suggestedRef.current = mentioned
 
+        const offer = mentioned.length === 1
+          ? `Shall I add the ${mentioned[0].name} to your order? Just say "add it" — or tell me if you'd prefer something different.`
+          : 'Shall I add one of those to your order? Just name the dish you would like — or tell me if you would prefer something different.'
+
         if (mentioned.length) {
           setStep('offer')
-          const offer = mentioned.length === 1
-            ? `Shall I add the ${mentioned[0].name} to your order? Just say "add it" — or tell me if you'd prefer something different.`
-            : 'Shall I add one of those to your order? Just name the dish you would like — or tell me if you would prefer something different.'
           setLog((l) => [...l, { from: 'alice', text: offer }])
-          narrateThenListen(`${final} ${offer}`, audioRef, voiceEnabled, () => mic.start())
         } else {
           setStep('menuDone')
-          narrateThenListen(final, audioRef, voiceEnabled, () => mic.start())
         }
+
+        // Wait for "Let me look through the menu" to finish before the
+        // answer starts, so one line never cuts off another.
+        await lineDone
+        if (run !== runRef.current) return
+        narrateThenListen(mentioned.length ? `${final} ${offer}` : final, audioRef, voiceEnabled, () => mic.start())
       },
-      onError: (m) => { setStreaming(false); setStep('cravings'); setError(m) },
+      onError: (m) => {
+        if (run !== runRef.current) return
+        setStreaming(false)
+        setStep('cravings')
+        setError(m)
+      },
     })
   }
 
@@ -527,14 +720,20 @@ export default function DiningConcierge({
 
   function restart() {
     stopAll()
+    runRef.current += 1
     setStep('mode')
     setTables([])
+    setTracked([])
     setCravings('')
+    setQuestion('')
     setSuggested([])
     setCart({})
     cartRef.current = {}
+    historyRef.current = []
+    setStreaming(false)
+    setReplyText('')
     setError('')
-    setLog([{ from: 'alice', text: LINES.greeting.text }])
+    setLog([{ from: 'alice', text: greetingText }])
   }
 
   function toggleVoice() {
@@ -546,7 +745,11 @@ export default function DiningConcierge({
     return (
       <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
         <p className="text-sm text-slate-500">
-          {user ? 'The dining concierge is available for guest accounts.' : 'Log in as a guest to reserve a table or order with Alice.'}
+          {user
+            ? `The ${isDelivery ? 'delivery' : 'dining'} concierge is available for guest accounts.`
+            : isDelivery
+              ? 'Log in as a guest to order, track or ask Alice anything.'
+              : 'Log in as a guest to reserve a table or order with Alice.'}
         </p>
       </div>
     )
@@ -556,6 +759,7 @@ export default function DiningConcierge({
   const cols3 = compact ? 'grid-cols-2' : 'sm:grid-cols-3'
   const btn = compact ? 'px-4 py-2.5 text-[13px]' : 'px-6 py-3 text-sm'
   const field = compact ? 'px-3 py-2.5 text-[13px]' : 'px-4 py-3 text-sm'
+  const optionBtn = 'rounded-xl border border-slate-200 bg-white px-5 py-4 text-left text-sm font-bold text-[#1F3A5F] transition hover:border-[#1F3A5F]/30 hover:bg-slate-50'
 
   const body = (
     <>
@@ -570,7 +774,7 @@ export default function DiningConcierge({
         {streaming && (
           <div className="flex justify-start">
             <div className={`max-w-[85%] whitespace-pre-line rounded-2xl bg-white px-4 py-2.5 leading-6 text-slate-700 ring-1 ring-slate-200 ${compact ? 'text-[13px]' : 'text-sm'}`}>
-              {replyText || 'Looking through the menu…'}<span className="animate-pulse">▌</span>
+              {replyText || 'Thinking…'}<span className="animate-pulse">▌</span>
             </div>
           </div>
         )}
@@ -605,16 +809,73 @@ export default function DiningConcierge({
       )}
 
       <div className="mt-4">
-        {step === 'mode' && (
-          <div className={`grid gap-3 ${cols2}`}>
-            <button type="button" onClick={() => chooseReserve()} className="rounded-xl border border-slate-200 bg-white px-5 py-4 text-left text-sm font-bold text-[#1F3A5F] hover:border-[#1F3A5F]/30 hover:bg-slate-50">
-              🍽️ Reserve a table
-            </button>
-            <button type="button" onClick={() => chooseOrder(null, 'delivery')} className="rounded-xl border border-slate-200 bg-white px-5 py-4 text-left text-sm font-bold text-[#1F3A5F] hover:border-[#1F3A5F]/30 hover:bg-slate-50">
-              🛵 Order delivery
-            </button>
+        {step === 'mode' && isDelivery && (
+          <div className={`grid gap-3 ${compact ? 'grid-cols-1' : 'sm:grid-cols-3'}`}>
+            <button type="button" onClick={() => chooseOrder(null, 'delivery')} className={optionBtn}>✨ Ask Alice to choose</button>
+            <button type="button" onClick={() => startTrack()} className={optionBtn}>🛵 Track an order</button>
+            <button type="button" onClick={() => startQuestion()} className={optionBtn}>💬 Have another question</button>
           </div>
         )}
+
+        {step === 'mode' && !isDelivery && (
+          <div className={`grid gap-3 ${cols2}`}>
+            <button type="button" onClick={() => chooseReserve()} className={optionBtn}>🍽️ Reserve a table</button>
+            <button type="button" onClick={() => chooseOrder(null, 'delivery')} className={optionBtn}>🛵 Order delivery</button>
+          </div>
+        )}
+
+        {step === 'tracking' && <p className="text-center text-sm text-slate-400">Alice is checking your orders…</p>}
+
+        {step === 'tracked' && (
+          <>
+            {tracked.length > 0 && (
+              <div className="space-y-2">
+                {tracked.map((o) => (
+                  <div key={o.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-bold text-[#1F3A5F]">Order {o.order_number}</p>
+                      <p className="text-xs text-slate-400">{formatDateTime(o.created_at)}</p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.08em] ${statusPillClass(o)}`}>{statusLabel(o)}</span>
+                      <button type="button" onClick={() => openTracker(o.id)} className="text-xs font-bold text-[#FF2147] hover:underline">Track →</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className={`mt-3 grid gap-2 ${cols2}`}>
+              <button type="button" onClick={() => startTrack('Check again')} className="rounded-xl border border-slate-300 py-3 text-sm font-bold text-[#1F3A5F] hover:bg-slate-50">Check again</button>
+              <button type="button" onClick={() => chooseOrder(null, 'delivery')} className="rounded-xl bg-[#FF2147] py-3 text-sm font-bold text-white hover:bg-[#dc1539]">Help me choose</button>
+            </div>
+          </>
+        )}
+
+        {step === 'question' && (
+          <>
+            <form
+              onSubmit={(e) => {
+                e.preventDefault()
+                const q = question.trim()
+                if (!q) return
+                setQuestion('')
+                askQuestion(q)
+              }}
+              className="flex gap-2"
+            >
+              <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Ask Alice anything…" className={`flex-1 rounded-xl border border-slate-300 outline-none focus:border-[#1F3A5F] ${field}`} />
+              <button type="submit" disabled={!question.trim()} className={`rounded-xl bg-[#1F3A5F] font-bold text-white hover:bg-[#162f4d] disabled:opacity-50 ${btn}`}>Ask</button>
+            </form>
+            {isDelivery && (
+              <div className="mt-3 flex flex-wrap justify-center gap-x-5 gap-y-1 text-xs font-bold text-[#1F3A5F]">
+                <button type="button" onClick={() => chooseOrder(null, 'delivery')} className="underline-offset-4 hover:underline">Help me choose</button>
+                <button type="button" onClick={() => startTrack()} className="underline-offset-4 hover:underline">Track my order</button>
+              </div>
+            )}
+          </>
+        )}
+
+        {step === 'answering' && <p className="text-center text-sm text-slate-400">Alice is thinking…</p>}
 
         {step === 'date' && (
           <form onSubmit={(e) => { e.preventDefault(); if (date) { setLog((l) => [...l, { from: 'user', text: date }]); say('askTime', 'time') } }} className="flex gap-2">
@@ -680,7 +941,7 @@ export default function DiningConcierge({
             <div className={`mt-3 grid gap-2 ${cols2}`}>
               <button type="button" onClick={() => say('askCravings', 'cravings')} className="rounded-xl border border-slate-300 py-3 text-sm font-bold text-[#1F3A5F] hover:bg-slate-50">Something different</button>
               <button type="button" onClick={goToOrder} className="rounded-xl bg-[#FF2147] py-3 text-sm font-bold text-white hover:bg-[#dc1539]">
-                {cartItems.length ? "That's all — checkout" : 'Go to the order page'}
+                {cartItems.length ? "That's all — checkout" : 'Go to the menu'}
               </button>
             </div>
           </>
@@ -689,13 +950,13 @@ export default function DiningConcierge({
         {step === 'menuDone' && (
           <div className={`grid gap-2 ${cols2}`}>
             <button type="button" onClick={viewFullMenu} className="rounded-xl bg-[#1F3A5F] px-5 py-3 text-sm font-bold text-white hover:bg-[#162f4d]">View full menu</button>
-            <button type="button" onClick={goToOrder} className="rounded-xl bg-[#FF2147] px-5 py-3 text-sm font-bold text-white hover:bg-[#dc1539]">
-              {orderMode === 'delivery' ? 'Continue to delivery order' : 'Order for delivery'}
+            <button type="button" onClick={() => say('askCravings', 'cravings')} className="rounded-xl bg-[#FF2147] px-5 py-3 text-sm font-bold text-white hover:bg-[#dc1539]">
+              {orderMode === 'delivery' ? 'Try something else' : 'Ask again'}
             </button>
           </div>
         )}
 
-        {['tables', 'menuDone', 'offer', 'upsell'].includes(step) && (
+        {['tables', 'menuDone', 'offer', 'upsell', 'tracked', 'question'].includes(step) && (
           <button type="button" onClick={restart} className="mt-3 w-full rounded-xl border border-slate-300 py-2.5 text-sm font-bold text-[#1F3A5F] hover:bg-slate-50">Start over</button>
         )}
       </div>
@@ -720,8 +981,12 @@ export default function DiningConcierge({
     <div id="dining-concierge-card" className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-slate-200/80 sm:p-8">
       <div className="flex items-start justify-between">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#FF2147]">AI Dining Concierge</p>
-          <h3 className="mt-2 text-2xl font-bold text-[#1F3A5F]">Reserve or order with Alice</h3>
+          <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#FF2147]">
+            {isDelivery ? 'AI Delivery Concierge' : 'AI Dining Concierge'}
+          </p>
+          <h3 className="mt-2 text-2xl font-bold text-[#1F3A5F]">
+            {isDelivery ? 'Choose, track or ask with Alice' : 'Reserve or order with Alice'}
+          </h3>
         </div>
         <button type="button" onClick={toggleVoice} className="flex items-center gap-1.5 rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-500 hover:bg-slate-50">
           <Icon name={voiceEnabled ? 'speaker' : 'muted'} className="h-3.5 w-3.5" />
@@ -729,7 +994,9 @@ export default function DiningConcierge({
         </button>
       </div>
       <p className="mt-2 text-sm leading-6 text-slate-500">
-        Tell her what you need — she checks real table availability and reads the real menu. Speak naturally or type.
+        {isDelivery
+          ? "She recommends real dishes from tonight's menu, tells you exactly where your order is, and answers anything else — speak naturally or type."
+          : 'Tell her what you need — she checks real table availability and reads the real menu. Speak naturally or type.'}
       </p>
       {body}
     </div>
