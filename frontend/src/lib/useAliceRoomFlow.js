@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { useAuth } from '../context/AuthContext'
+import { requireAuth } from './authRedirect'
 import { useAutoMic, speakThenListen, narrateThenListen, streamAssistant } from './aliceVoice'
 
 export const ALICE_ROOM_LINES = {
@@ -96,6 +98,8 @@ function matchRoomFromText(text, rooms) {
 // setting active=true.
 export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut = '', defaultGuests = 2, active = true }) {
   const navigate = useNavigate()
+  const location = useLocation()
+  const { user } = useAuth()
   const activeAudioRef = useRef(null)
   const replyTextRef = useRef('')
   const hasStartedRef = useRef(false)
@@ -310,7 +314,14 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
       roomTypeName: room.room_type || 'Hotel Room', price: String(room.base_price || 0),
       guests: String(guests), checkIn, checkOut,
     })
-    navigate(`/hotels/${hotelId}/booking/checkout?${params.toString()}`)
+    const target = `/hotels/${hotelId}/booking/checkout?${params.toString()}`
+    // The one point that genuinely needs an account. Signing in returns the
+    // guest straight to this checkout, with the room and dates intact.
+    if (!requireAuth(user, navigate, location, {
+      from: target,
+      reason: `Please sign in to complete your booking for Room ${room.room_number}. Your room and dates are saved.`,
+    })) return
+    navigate(target)
   }
 
   function submitConfirmValue(value) {

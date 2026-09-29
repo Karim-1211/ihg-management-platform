@@ -193,6 +193,10 @@ class OrderResponse(BaseModel):
     created_at: datetime
     items: list[OrderItemResponse] = []
     table_number: str | None = None
+    # Staff need to know whose order this is at a glance, without opening it.
+    customer_name: str | None = None
+    customer_phone: str | None = None
+    item_count: int = 0
 
     # Phase 19.2: read-only delivery enrichment (only populated for
     # DELIVERY-type orders; None for DINE_IN/ROOM_SERVICE).

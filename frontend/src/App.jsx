@@ -91,6 +91,11 @@ function HomePage() {
       .finally(() => setLoading(false))
   }, [isCustomer])
 
+  // Browsing is open to everyone; only committing to a booking or an order
+  // needs an account. A signed-out visitor landing on "/" goes straight to
+  // the hotel, not to a login wall.
+  if (!user) return <Navigate to="/hotels" replace />
+
   if (!isCustomer) {
     return (
       <AppLayout>
@@ -218,7 +223,7 @@ function App() {
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
-      <Route path="/" element={<ProtectedRoute><HomePage /></ProtectedRoute>} />
+      <Route path="/" element={<HomePage />} />
       <Route path="/hotels" element={<HotelsPage />} />
       <Route path="/hotels/:hotelId" element={<HotelRoomsPage />} />
       <Route
@@ -238,6 +243,9 @@ function App() {
       <Route path="/restaurants/:restaurantId/reserve" element={<ReserveTablePage />} />
 
       <Route path="/delivery" element={<DeliveryHomePage />} />
+      {/* Checkout still requires an account — ProtectedRoute already passes
+          the current path as `from`, so signing in returns the guest here
+          with their basket intact. */}
       <Route
         path="/delivery/checkout"
         element={

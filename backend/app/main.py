@@ -1,3 +1,6 @@
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -10,11 +13,32 @@ from app.routers import (
     notifications, dashboard, reports, business_rules, ai_customer_assistant, ai_staff_assistant,
     booking_import, media, newsletter, delivery_checkout,
 )
+from app.services import email_worker
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("ihg")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Queued emails are delivered by a background worker rather than inline,
+    # so a slow mail server can never delay a booking or an order.
+    problems = settings.validate_production_readiness()
+    for problem in problems:
+        logger.warning("Production readiness: %s", problem)
+
+    email_worker.start()
+    try:
+        yield
+    finally:
+        await email_worker.stop()
+
 
 app = FastAPI(
     title="IHG Management Platform API",
     version="1.0.0",
     description="Enterprise Hospitality, Restaurant & Food Delivery Management Platform",
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -63,4 +87,5 @@ def health_check():
     return {
         "status": "healthy" if db_healthy else "unhealthy",
         "checks": {"database": "up" if db_healthy else "down"},
+        "email_mode": settings.email_mode,
     }

@@ -26,10 +26,13 @@ function Icon({ name, size = 18 }) {
     check: (<path d="M20 6 9 17l-5-5" />),
     mail: (<><rect x="2" y="4" width="20" height="16" rx="2" /><path d="m22 7-10 6L2 7" /></>),
     pin: (<><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z" /><circle cx="12" cy="10" r="3" /></>),
+    phone: (<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .3 1.9.6 2.8a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.2-1.2a2 2 0 0 1 2.1-.5c.9.3 1.8.5 2.8.6a2 2 0 0 1 1.7 2Z" />),
+    compass: (<><circle cx="12" cy="12" r="9" /><path d="m15.5 8.5-2 5.5-5.5 2 2-5.5 5.5-2Z" /></>),
     bed: (<><path d="M2 20v-8a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v8M2 16h20M6 10V7a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3" /></>),
     dish: (<><path d="M3 17h18M5 17a7 7 0 0 1 14 0M12 6v4M12 4h.01" /></>),
     scooter: (<><circle cx="6" cy="18" r="3" /><circle cx="18" cy="18" r="3" /><path d="M9 18h6M15 18V7a2 2 0 0 1 2-2h2M6 15V9h5l3 6" /></>),
     arrowDown: (<path d="M12 5v14M19 12l-7 7-7-7" />),
+    arrow: (<path d="M5 12h14m-6-6 6 6-6 6" />),
   }
   return <svg {...common}>{paths[name]}</svg>
 }
@@ -37,15 +40,26 @@ function Icon({ name, size = 18 }) {
 const MOTIONS = ['heroZoomIn', 'heroPanLeft', 'heroPanRight', 'heroZoomOut']
 
 function CinematicHero({ images, alt }) {
-  const safe = images.filter(Boolean)
+  const [failed, setFailed] = useState(() => new Set())
   const [index, setIndex] = useState(0)
   const CYCLE_MS = 6000
+
+  const safe = useMemo(() => images.filter((src) => src && !failed.has(src)), [images, failed])
+
+  function markFailed(src) {
+    console.warn('[Hero] image failed to load, skipping:', src)
+    setFailed((prev) => new Set(prev).add(src))
+  }
 
   useEffect(() => {
     if (safe.length <= 1) return undefined
     const t = window.setInterval(() => setIndex((c) => (c + 1) % safe.length), CYCLE_MS)
     return () => window.clearInterval(t)
   }, [safe.length])
+
+  useEffect(() => {
+    if (index >= safe.length) setIndex(0)
+  }, [safe.length, index])
 
   if (!safe.length) return null
 
@@ -58,10 +72,16 @@ function CinematicHero({ images, alt }) {
         @keyframes heroPanRight{ from { transform: scale(1.14) translate3d(-3.5%,0,0); } to { transform: scale(1.14) translate3d(3.5%,0,0); } }
       `}</style>
       {safe.map((src, i) => (
+        // Stable key. The old key changed every cycle, so React destroyed
+        // and rebuilt the <img>, forcing the browser to re-download it —
+        // which is what made the hero flash the dark background. The
+        // animation still restarts correctly, because `animation` flips
+        // between 'none' and the animation name as the index moves.
         <img
-          key={`${src}-${i}-${i === index ? 'on' : 'off'}`}
+          key={src}
           src={src}
           alt={alt}
+          onError={() => markFailed(src)}
           className="absolute inset-0 h-full w-full object-cover transition-opacity duration-[1100ms]"
           style={{
             opacity: i === index ? 1 : 0,
@@ -114,7 +134,7 @@ function BookingBar({ onSearch }) {
       </label>
       <button type="submit" className="flex min-h-[74px] items-center justify-center gap-2 rounded-b-2xl bg-[#FF2147] px-9 text-base font-bold uppercase tracking-[0.08em] text-white transition hover:bg-[#dc1539] md:rounded-b-none md:rounded-r-2xl">
         <Icon name="search" size={17} />
-        Check rates
+        Check availability
       </button>
     </form>
   )
@@ -189,81 +209,6 @@ function RoomsCarousel({ roomTypes, onSelect }) {
         </div>
       )}
     </div>
-  )
-}
-
-function NewsletterSection() {
-  const [firstName, setFirstName] = useState('')
-  const [lastName, setLastName] = useState('')
-  const [email, setEmail] = useState('')
-  const [consent, setConsent] = useState(false)
-  const [status, setStatus] = useState('idle')
-  const [message, setMessage] = useState('')
-
-  async function submit(e) {
-    e.preventDefault()
-    if (!email.trim() || !consent) return
-    setStatus('sending')
-    setMessage('')
-    try {
-      const res = await api.post('/newsletter/subscribe', {
-        email: email.trim(),
-        first_name: firstName.trim() || null,
-        last_name: lastName.trim() || null,
-        source: 'homepage',
-      })
-      setStatus('done')
-      setMessage(res.data?.message || "Thank you — you're on the list.")
-    } catch (err) {
-      setStatus('error')
-      setMessage(err.response?.data?.detail || 'Something went wrong. Please try again in a moment.')
-    }
-  }
-
-  return (
-    <section className="bg-navy px-4 py-24 sm:px-6 lg:px-8">
-      <div className={`mx-auto ${CONTENT_MAX_W} grid gap-14 lg:grid-cols-[.9fr_1.1fr] lg:items-center`}>
-        <div>
-          <p className="text-sm font-extrabold uppercase tracking-[0.2em] text-[#FF2147]">Get in touch</p>
-          <h2 className="mt-3 font-serif text-5xl leading-tight text-white sm:text-6xl">Be the first to know.</h2>
-          <p className="mt-5 text-lg leading-8 text-white/70">
-            Seasonal rates, new suites and quiet midweek offers — sent sparingly, never shared with anyone
-            else, and one click to leave whenever you like.
-          </p>
-        </div>
-
-        {status === 'done' ? (
-          <div className="flex items-center gap-4 rounded-2xl bg-white/10 px-7 py-8 text-white ring-1 ring-white/20">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500"><Icon name="check" size={20} /></span>
-            <p className="text-base leading-7">{message}</p>
-          </div>
-        ) : (
-          <form onSubmit={submit} className="rounded-2xl bg-white/[0.06] p-6 ring-1 ring-white/15 sm:p-8">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="First name"
-                className="rounded-xl border border-white/15 bg-white/5 px-4 py-3.5 text-base text-white placeholder-white/40 outline-none focus:border-white/40" />
-              <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Last name"
-                className="rounded-xl border border-white/15 bg-white/5 px-4 py-3.5 text-base text-white placeholder-white/40 outline-none focus:border-white/40" />
-            </div>
-            <div className="relative mt-4">
-              <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-white/40"><Icon name="mail" /></span>
-              <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address"
-                className="w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3.5 pl-12 text-base text-white placeholder-white/40 outline-none focus:border-white/40" />
-            </div>
-            <label className="mt-5 flex cursor-pointer items-start gap-3 text-sm leading-6 text-white/70">
-              <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)}
-                className="mt-1 h-4 w-4 shrink-0 rounded border-white/30 bg-white/10 accent-[#FF2147]" />
-              <span>I'd like to receive email news and offers from IHG Hospitality.</span>
-            </label>
-            <button type="submit" disabled={status === 'sending' || !consent}
-              className="mt-6 w-full rounded-xl bg-[#FF2147] py-4 text-base font-bold uppercase tracking-[0.06em] text-white transition hover:bg-[#dc1539] disabled:cursor-not-allowed disabled:opacity-40">
-              {status === 'sending' ? 'Joining…' : 'Subscribe'}
-            </button>
-            {status === 'error' && <p className="mt-3 text-center text-sm text-red-300">{message}</p>}
-          </form>
-        )}
-      </div>
-    </section>
   )
 }
 
@@ -352,11 +297,26 @@ export default function HotelsPage() {
     [roomTypes]
   )
 
+  const fullAddress = useMemo(() => {
+    if (!hotel) return ''
+    return [hotel.address, hotel.city, hotel.country].filter(Boolean).join(', ')
+  }, [hotel])
+
+  const directionsUrl = fullAddress
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${hotel.name} ${fullAddress}`)}`
+    : null
+
+  // Both entry points carry startAlice, so the concierge can begin speaking
+  // on arrival — the guest's click here is the browser interaction that
+  // permits audio, so no separate "start voice" button is needed.
   function onSearch({ checkIn, checkOut, guests }) {
-    navigate(`/hotels/${hotel?.id || ''}?check_in_date=${encodeURIComponent(checkIn)}&check_out_date=${encodeURIComponent(checkOut)}&guests=${guests}&auto_search=1`)
+    navigate(
+      `/hotels/${hotel?.id || ''}?check_in_date=${encodeURIComponent(checkIn)}&check_out_date=${encodeURIComponent(checkOut)}&guests=${guests}&auto_search=1`,
+      { state: { startAlice: true } }
+    )
   }
 
-  const openHotel = () => hotel && navigate(`/hotels/${hotel.id}`)
+  const openHotel = () => hotel && navigate(`/hotels/${hotel.id}`, { state: { startAlice: true } })
 
   const collage = [hotelImages[0], hotelImages[1] || HERO_EXTRAS[0], hotelImages[2] || HERO_EXTRAS[1]]
 
@@ -364,7 +324,7 @@ export default function HotelsPage() {
     <AppLayout>
       <div className="relative left-1/2 -ml-[50vw] w-screen -mt-6 lg:-mt-8">
 
-        <section className="relative h-[88vh] min-h-[640px] bg-[#132840]">
+        <section className="relative h-[72vh] min-h-[580px] bg-[#132840]">
           <CinematicHero images={heroImages} alt={hotel?.name || 'IHG Hospitality'} />
           <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-black/35 to-black/65" />
           <div className="relative flex h-full flex-col items-center justify-center px-6 text-center">
@@ -484,7 +444,7 @@ export default function HotelsPage() {
               {[
                 { icon: 'bed', eyebrow: 'Stay', title: 'Hotel', copy: 'Browse real rooms with their own galleries, check live availability for your dates, and request housekeeping or in-room service during your stay.', cta: 'Explore rooms', action: openHotel },
                 { icon: 'dish', eyebrow: 'Dine', title: 'Restaurant', copy: 'Reserve a table, browse the full menu ahead of time, and order in the dining room without waiting to catch a waiter.', cta: 'View restaurant', action: () => navigate('/restaurants') },
-                { icon: 'scooter', eyebrow: 'Deliver', title: 'Food Delivery', copy: 'The same kitchen, brought to your door or your room. Track the order from preparation through to arrival.', cta: 'Order delivery', action: () => navigate('/restaurants?intent=delivery') },
+                { icon: 'scooter', eyebrow: 'Deliver', title: 'Food Delivery', copy: 'The same kitchen, brought to your door or your room. Track the order from preparation through to arrival.', cta: 'Order delivery', action: () => navigate('/delivery') },
               ].map((card) => (
                 <div key={card.title} className="flex flex-col rounded-2xl border border-slate-200 bg-white p-8 transition hover:border-navy/25 hover:shadow-lg">
                   <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#FF2147]/10 text-[#FF2147]">
@@ -502,31 +462,68 @@ export default function HotelsPage() {
           </div>
         </section>
 
-        <section className="bg-[#F5F2ED] px-4 py-28 sm:px-6 lg:px-8">
-          <div className={`mx-auto ${CONTENT_MAX_W} grid gap-14 lg:grid-cols-[1.05fr_.95fr] lg:items-center`}>
-            <div className="grid grid-cols-2 gap-4">
-              <img src={DHAKA_NIGHT} alt="Dhaka at night" className="col-span-2 h-64 w-full rounded-2xl object-cover sm:h-80" />
-              <img src={DHAKA_STREET} alt="Dhaka street" className="h-48 w-full rounded-2xl object-cover sm:h-56" />
-              {hotelImages[0] && <img src={hotelImages[0]} alt="" className="h-48 w-full rounded-2xl object-cover sm:h-56" />}
-            </div>
+        {/* The neighbourhood — a full-bleed editorial band rather than a
+            plain two-column block, with the address presented as a card and
+            a real directions link. */}
+        <section className="relative overflow-hidden bg-[#0B1B2D] px-4 py-28 sm:px-6 lg:px-8">
+          <img src={DHAKA_NIGHT} alt="" className="absolute inset-0 h-full w-full object-cover opacity-20" />
+          <div className="absolute inset-0 bg-gradient-to-r from-[#0B1B2D] via-[#0B1B2D]/92 to-[#0B1B2D]/55" />
+          <div className="pointer-events-none absolute -left-32 top-10 h-80 w-80 rounded-full bg-[#FF2147]/10 blur-3xl" />
+
+          <div className={`relative mx-auto ${CONTENT_MAX_W} grid gap-16 lg:grid-cols-[.95fr_1.05fr] lg:items-center`}>
             <div>
-              <p className="text-sm font-extrabold uppercase tracking-[0.2em] text-[#FF2147]">The neighbourhood</p>
-              <h2 className="mt-3 font-serif text-5xl leading-tight text-navy sm:text-6xl">Around Dhaka.</h2>
-              <p className="mt-5 text-lg leading-8 text-slate-600">
-                Close enough to the city's restaurants, markets and offices to walk out into them, far enough
-                from the traffic to sleep through it. Whether you're here for two nights of meetings or a long
-                weekend, everything worth seeing is a short ride away.
+              <p className="text-sm font-extrabold uppercase tracking-[0.22em] text-[#FF2147]">The neighbourhood</p>
+              <h2 className="mt-4 font-serif text-5xl leading-[1.05] text-white sm:text-7xl">
+                Around<br />Dhaka.
+              </h2>
+              <p className="mt-7 max-w-lg text-lg leading-8 text-white/60">
+                Close enough to the city's restaurants, markets and offices to walk out into them — far enough
+                from the traffic to sleep through it. Two nights of meetings or a long slow weekend: everything
+                worth seeing is a short ride away.
               </p>
-              {hotel?.address && (
-                <p className="mt-7 flex items-start gap-3 text-base leading-7 text-navy">
-                  <span className="mt-1 shrink-0 text-[#FF2147]"><Icon name="pin" size={18} /></span>
-                  <span>
-                    <span className="font-bold">{hotel.name}</span><br />
-                    {hotel.address}{hotel.city ? `, ${hotel.city}` : ''}{hotel.country ? `, ${hotel.country}` : ''}
-                  </span>
-                </p>
+
+              {hotel && (
+                <div className="mt-10 max-w-md rounded-2xl border border-white/10 bg-white/[0.04] p-7 backdrop-blur-sm">
+                  <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-white/40">Find us</p>
+                  <p className="mt-4 flex items-start gap-3.5 text-[15px] leading-7 text-white">
+                    <span className="mt-1 shrink-0 text-[#FF2147]"><Icon name="pin" size={17} /></span>
+                    <span>
+                      <span className="font-bold">{hotel.name}</span>
+                      {fullAddress && <><br />{fullAddress}</>}
+                    </span>
+                  </p>
+                  {hotel.phone && (
+                    <p className="mt-4 flex items-center gap-3.5 text-[15px] text-white/70">
+                      <span className="shrink-0 text-[#FF2147]"><Icon name="phone" size={17} /></span>
+                      <a href={`tel:${hotel.phone}`} className="transition hover:text-white">{hotel.phone}</a>
+                    </p>
+                  )}
+                              {directionsUrl ? (
+                    <a href={directionsUrl} target="_blank" rel="noreferrer" className="group mt-7 inline-flex items-center gap-2.5 border-b border-[#FF2147]/40 pb-1 text-xs font-bold uppercase tracking-[0.16em] text-white transition hover:border-[#FF2147]">
+                      <Icon name="compass" size={15} />
+                      Get directions
+                      <span className="transition-transform group-hover:translate-x-1"><Icon name="arrow" size={14} /></span>
+                    </a>
+                  ) : null}
+                </div>
               )}
-              {hotel?.phone && <p className="mt-3 text-base text-slate-600">Reception: {hotel.phone}</p>}
+            </div>
+
+            <div className="grid grid-cols-2 gap-5">
+              <figure className="col-span-2 overflow-hidden rounded-2xl">
+                <img src={DHAKA_NIGHT} alt="Dhaka after dark" className="h-72 w-full object-cover sm:h-[360px]" />
+                <figcaption className="mt-3 text-[11px] font-bold uppercase tracking-[0.16em] text-white/35">Dhaka after dark</figcaption>
+              </figure>
+              <figure className="overflow-hidden rounded-2xl">
+                <img src={DHAKA_STREET} alt="Dhanmondi streets" className="h-52 w-full object-cover" />
+                <figcaption className="mt-3 text-[11px] font-bold uppercase tracking-[0.16em] text-white/35">The streets nearby</figcaption>
+              </figure>
+              {hotelImages[0] && (
+                <figure className="overflow-hidden rounded-2xl">
+                  <img src={hotelImages[0]} alt="" className="h-52 w-full object-cover" />
+                  <figcaption className="mt-3 text-[11px] font-bold uppercase tracking-[0.16em] text-white/35">Back at the hotel</figcaption>
+                </figure>
+              )}
             </div>
           </div>
         </section>

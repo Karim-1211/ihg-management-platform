@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import api from '../../services/api'
+import Brand from './Brand'
 
 function Icon({ name, size = 16 }) {
   const c = { width: size, height: size, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', strokeLinejoin: 'round' }
@@ -66,11 +67,7 @@ export default function SiteFooter() {
         <div className="grid gap-12 py-14 lg:grid-cols-[.8fr_1.2fr] lg:gap-20">
 
           <div>
-            <div className="flex items-baseline gap-3">
-              <span className="font-serif text-4xl tracking-tight text-white">IHG</span>
-              <span className="h-6 w-px bg-white/15" />
-              <span className="text-[11px] font-bold uppercase tracking-[0.24em] text-[#FF2147]">Hospitality</span>
-            </div>
+            <Brand variant="dark" size="lg" />
 
             <p className="mt-5 max-w-sm text-[15px] leading-7 text-white/55">
               One account for your stay, your table and your delivery — from the first booking to the last bill.

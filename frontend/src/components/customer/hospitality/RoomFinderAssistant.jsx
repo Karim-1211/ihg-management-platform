@@ -19,21 +19,22 @@ function Icon({ name, className = 'h-5 w-5' }) {
       <line x1="17" y1="9" x2="23" y2="15" />
     </svg>
   )
-  if (name === 'mic') return (
-    <svg {...common}>
-      <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-      <line x1="12" y1="19" x2="12" y2="23" />
-      <line x1="8" y1="23" x2="16" y2="23" />
-    </svg>
-  )
   return null
 }
 
-export default function RoomFinderAssistant({ hotelId, defaultCheckIn = '', defaultCheckOut = '', defaultGuests = 2 }) {
+export default function RoomFinderAssistant({
+  hotelId,
+  defaultCheckIn = '',
+  defaultCheckOut = '',
+  defaultGuests = 2,
+  startVoiceSignal = 0,
+}) {
   const { user } = useAuth()
-  const isCustomer = user?.role === 'CUSTOMER'
-  const flow = useAliceRoomFlow({ hotelId, defaultCheckIn, defaultCheckOut, defaultGuests, active: isCustomer })
+  // Alice helps everyone. Room availability, prices and recommendations are
+  // public, so a signed-out visitor gets the full conversation — we only ask
+  // them to sign in at the moment they choose a room to book.
+  const isStaff = !!user && user.role !== 'CUSTOMER'
+  const flow = useAliceRoomFlow({ hotelId, defaultCheckIn, defaultCheckOut, defaultGuests, active: !isStaff })
 
   const [logEndRef, setLogEndRef] = useState(null)
   const [voiceStarted, setVoiceStarted] = useState(false)
@@ -42,19 +43,25 @@ export default function RoomFinderAssistant({ hotelId, defaultCheckIn = '', defa
     logEndRef?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }, [flow.log, flow.replyText, logEndRef])
 
+  // The page raises this signal when the guest clicks "Check availability"
+  // or arrives from "View rooms & book". That click satisfies the browser's
+  // requirement that audio follow a user interaction, so Alice can simply
+  // start talking — no "turn on voice" button for the guest to find.
+  useEffect(() => {
+    if (!startVoiceSignal || voiceStarted || isStaff || !hotelId) return
+    if (!flow.voiceEnabled) return
+    setVoiceStarted(true)
+    const timer = window.setTimeout(() => flow.startVoice(), 400)
+    return () => window.clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startVoiceSignal, isStaff, hotelId])
+
   const allShownRooms = [...flow.primaryRooms, ...flow.secondaryRooms]
 
-  function handleStartVoice() {
-    setVoiceStarted(true)
-    flow.startVoice()
-  }
-
-  if (!isCustomer) {
+  if (isStaff) {
     return (
       <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
-        <p className="text-sm text-slate-500">
-          {user ? 'AI room suggestions are available for guest accounts.' : 'Log in as a guest to chat with Alice, our AI concierge.'}
-        </p>
+        <p className="text-sm text-slate-500">The guest concierge is available on guest accounts.</p>
       </div>
     )
   }
@@ -109,17 +116,6 @@ export default function RoomFinderAssistant({ hotelId, defaultCheckIn = '', defa
       )}
 
       <div className="mt-3 min-h-[96px]">
-        {flow.step === 'preference' && !voiceStarted && flow.voiceEnabled && (
-          <button
-            type="button"
-            onClick={handleStartVoice}
-            className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl bg-[#FF2147] py-3 text-sm font-bold text-white hover:bg-[#dc1539]"
-          >
-            <Icon name="mic" className="h-4 w-4" />
-            Talk to Alice — hands-free from here
-          </button>
-        )}
-
         {flow.step === 'preference' && (
           <form onSubmit={(e) => { e.preventDefault(); flow.submitPreferenceValue() }}>
             <textarea

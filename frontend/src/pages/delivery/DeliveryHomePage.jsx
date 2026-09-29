@@ -332,7 +332,12 @@ export default function DeliveryHomePage() {
     navigate('/delivery/checkout')
   }
 
-  const heroSecondary = 'flex items-center gap-2 rounded-xl border border-white/40 bg-white/10 px-6 py-3 text-xs font-bold uppercase tracking-[0.12em] text-white backdrop-blur-sm transition hover:bg-white hover:text-[#1F3A5F]'
+  // Two solid buttons in different colours: red leads (most guests arrive
+  // hungry), white is the clearly-secondary tracking action. Solid fills
+  // read cleanly against the photography, where translucent glass did not.
+  const heroButton = 'flex items-center gap-2.5 rounded-xl px-7 py-3.5 text-xs font-bold uppercase tracking-[0.12em] shadow-lg transition duration-200 hover:-translate-y-0.5 hover:shadow-xl'
+  const heroPrimary = `${heroButton} bg-[#FF2147] text-white hover:bg-[#dc1539]`
+  const heroSecondaryBtn = `${heroButton} bg-white text-[#1F3A5F] hover:bg-[#F0EBE3]`
 
   return (
     <AppLayout>
@@ -362,11 +367,11 @@ export default function DeliveryHomePage() {
               <button type="button" onClick={() => scrollTo('the-menu')} className="rounded-xl bg-[#FF2147] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#dc1539]">Search</button>
             </div>
 
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-              <button type="button" onClick={askAlice} className={heroSecondary}>
+            <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+              <button type="button" onClick={askAlice} className={heroPrimary}>
                 <Icon name="sparkle" size={15} /> Ask Alice to choose
               </button>
-              <Link to="/delivery/orders" className={heroSecondary}>
+              <Link to="/delivery/orders" className={heroSecondaryBtn}>
                 <Icon name="scooter" size={15} /> Track an order
               </Link>
             </div>
@@ -386,8 +391,8 @@ export default function DeliveryHomePage() {
           </section>
         )}
 
-        <section id="the-menu" className="scroll-mt-[72px] bg-[#F0EBE3]">
-          <div className="sticky top-[72px] z-30 border-b border-[#1F3A5F]/10 bg-[#F0EBE3]/95 backdrop-blur">
+        <section id="the-menu" className="scroll-mt-[76px] bg-[#F0EBE3]">
+          <div className="sticky top-[76px] z-30 border-b border-[#1F3A5F]/10 bg-[#F0EBE3]/95 backdrop-blur">
             <div className={`mx-auto ${CONTENT_MAX_W} flex flex-col gap-3 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:px-8`}>
               <div className="-mx-1 flex gap-1 overflow-x-auto pb-1 lg:pb-0">
                 {[{ id: 'all', name: 'Full menu' }, ...categories].map((c) => (

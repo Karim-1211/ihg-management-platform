@@ -72,15 +72,30 @@ function Icon({ name, size = 18 }) {
 }
 
 function CinematicHero({ images, alt }) {
-  const safe = images.filter(Boolean)
+  // An image that fails to load leaves a transparent frame, so the dark
+  // section background shows through and the hero looks broken. Any image
+  // that fails is dropped from the rotation and named in the console, so a
+  // missing file can never stall the sequence.
+  const [failed, setFailed] = useState(() => new Set())
   const [index, setIndex] = useState(0)
   const CYCLE_MS = 6000
+
+  const safe = useMemo(() => images.filter((src) => src && !failed.has(src)), [images, failed])
+
+  function markFailed(src) {
+    console.warn('[Hero] image failed to load, skipping:', src)
+    setFailed((prev) => new Set(prev).add(src))
+  }
 
   useEffect(() => {
     if (safe.length <= 1) return undefined
     const t = window.setInterval(() => setIndex((c) => (c + 1) % safe.length), CYCLE_MS)
     return () => window.clearInterval(t)
   }, [safe.length])
+
+  useEffect(() => {
+    if (index >= safe.length) setIndex(0)
+  }, [safe.length, index])
 
   if (!safe.length) return null
 
@@ -93,10 +108,15 @@ function CinematicHero({ images, alt }) {
         @keyframes heroPanRight{ from { transform: scale(1.14) translate3d(-3.5%,0,0); } to { transform: scale(1.14) translate3d(3.5%,0,0); } }
       `}</style>
       {safe.map((src, i) => (
+        // Stable key. The old key changed every cycle, so React destroyed
+        // and rebuilt the <img>, forcing a re-download and the dark flash.
+        // The animation still restarts, because `animation` flips between
+        // 'none' and the animation name as the index moves.
         <img
-          key={`${src}-${i}-${i === index ? 'on' : 'off'}`}
+          key={src}
           src={src}
           alt={alt}
+          onError={() => markFailed(src)}
           className="absolute inset-0 h-full w-full object-cover transition-opacity duration-[1100ms]"
           style={{
             opacity: i === index ? 1 : 0,
@@ -315,7 +335,7 @@ export default function RestaurantsPage() {
     <AppLayout>
       <div className="relative left-1/2 -ml-[50vw] w-screen -mt-6 lg:-mt-8">
 
-        <section className="relative h-[88vh] min-h-[640px] bg-[#0E2036]">
+        <section className="relative h-[72vh] min-h-[580px] bg-[#0E2036]">
           <CinematicHero images={HERO_IMAGES} alt={active?.name || 'Restaurant'} />
           <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/40 to-black/75" />
           <div className="relative flex h-full flex-col items-center justify-center px-6 text-center">

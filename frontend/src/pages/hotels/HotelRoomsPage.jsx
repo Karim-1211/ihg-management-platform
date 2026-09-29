@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import api from '../../services/api'
 import AppLayout from '../../components/layout/AppLayout'
 import RoomGallery from '../../components/customer/hospitality/RoomGallery'
@@ -107,8 +107,10 @@ function CinematicHeroImage({ images, alt }) {
         }
       `}</style>
       {safeImages.map((src, i) => (
+        // Stable key — see the note on the other heroes: a changing key
+        // forced the browser to re-download each image mid-cycle.
         <img
-          key={`${src}-${i}-${i === index ? 'on' : 'off'}`}
+          key={src}
           src={src}
           alt={alt}
           className="absolute inset-0 h-full w-full object-cover transition-opacity duration-[900ms]"
@@ -342,6 +344,13 @@ export default function HotelRoomsPage() {
   const heroRef = useRef(null)
   const conciergeSectionRef = useRef(null)
 
+  const location = useLocation()
+  // Alice starts speaking on a real guest click — either arriving here from
+  // "Check availability" / "View rooms & book", or pressing the search
+  // button on this page. That click is the browser interaction that permits
+  // audio, so no separate "start voice" button is needed.
+  const [aliceSignal, setAliceSignal] = useState(location.state?.startAlice ? 1 : 0)
+
   useEffect(() => {
     let mounted = true
 
@@ -450,6 +459,7 @@ export default function HotelRoomsPage() {
       return
     }
 
+    if (event) setAliceSignal((n) => n + 1)
     setSearching(true)
     try {
       const response = await api.get('/rooms/available', {
@@ -564,6 +574,7 @@ export default function HotelRoomsPage() {
               defaultCheckIn={checkIn}
               defaultCheckOut={checkOut}
               defaultGuests={guests}
+              startVoiceSignal={aliceSignal}
             />
           </div>
         </section>
@@ -694,20 +705,6 @@ export default function HotelRoomsPage() {
                 Explore Our Restaurant →
               </button>
             </div>
-          </div>
-        </section>
-
-        <section className="bg-[#101F31] px-5 py-20 text-white sm:px-8 lg:px-10">
-          <div className="mx-auto max-w-4xl text-center">
-            <p className="text-sm font-extrabold uppercase tracking-[0.2em] text-white/50">Ready when you are</p>
-            <h2 className="mt-3 font-serif text-5xl leading-tight sm:text-6xl">See the exact room first. Select dates. Review the stay. Then pay.</h2>
-            <button
-              type="button"
-              onClick={() => document.getElementById('rooms-suites')?.scrollIntoView({ behavior: 'smooth' })}
-              className="mt-8 rounded-xl bg-[#FF2147] px-8 py-4 text-base font-bold uppercase tracking-[0.06em] text-white transition hover:bg-[#dc1539]"
-            >
-              Browse Rooms & Suites
-            </button>
           </div>
         </section>
 

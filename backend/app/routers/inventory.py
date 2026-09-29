@@ -14,6 +14,23 @@ from app.services import inventory_service
 
 router = APIRouter(prefix="/api/v1/inventory", tags=["Inventory"])
 
+# Any role that can see an inventory item can also see how its stock moved —
+# a waiter or kitchen user reading "12.9 kg left" needs to know whether that
+# came from an order, waste or a delivery. The per-item ownership check in
+# inventory_service still applies on top of this.
+STOCK_VIEW_ROLES = (
+    RoleEnum.SUPER_ADMIN, RoleEnum.MANAGER, RoleEnum.RECEPTIONIST,
+    RoleEnum.HOUSEKEEPING, RoleEnum.KITCHEN, RoleEnum.WAITER,
+)
+
+# Kitchen and waiting staff are the people who actually discover waste and
+# breakage, so they can record it; the service layer still refuses
+# ORDER_USAGE from this path, which only an order may create.
+STOCK_EDIT_ROLES = (
+    RoleEnum.SUPER_ADMIN, RoleEnum.MANAGER, RoleEnum.RECEPTIONIST,
+    RoleEnum.HOUSEKEEPING, RoleEnum.KITCHEN, RoleEnum.WAITER,
+)
+
 
 @router.post("/items", response_model=InventoryItemResponse, status_code=201)
 def create_item(
@@ -28,9 +45,7 @@ def create_item(
 def list_for_hotel(
     hotel_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(
-        RoleEnum.SUPER_ADMIN, RoleEnum.MANAGER, RoleEnum.RECEPTIONIST, RoleEnum.HOUSEKEEPING, RoleEnum.KITCHEN
-    )),
+    current_user: User = Depends(require_roles(*STOCK_VIEW_ROLES)),
 ):
     return inventory_service.list_inventory_for_hotel(db, current_user, hotel_id)
 
@@ -39,9 +54,7 @@ def list_for_hotel(
 def list_for_restaurant(
     restaurant_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(
-        RoleEnum.SUPER_ADMIN, RoleEnum.MANAGER, RoleEnum.KITCHEN, RoleEnum.WAITER
-    )),
+    current_user: User = Depends(require_roles(*STOCK_VIEW_ROLES)),
 ):
     return inventory_service.list_inventory_for_restaurant(db, current_user, restaurant_id)
 
@@ -51,9 +64,7 @@ def record_transaction(
     item_id: uuid.UUID,
     data: ManualStockAdjustment,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(
-        RoleEnum.SUPER_ADMIN, RoleEnum.MANAGER, RoleEnum.RECEPTIONIST, RoleEnum.HOUSEKEEPING
-    )),
+    current_user: User = Depends(require_roles(*STOCK_EDIT_ROLES)),
 ):
     return inventory_service.record_manual_transaction(db, current_user, item_id, data)
 
@@ -62,9 +73,7 @@ def record_transaction(
 def list_transactions(
     item_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles(
-        RoleEnum.SUPER_ADMIN, RoleEnum.MANAGER, RoleEnum.RECEPTIONIST, RoleEnum.HOUSEKEEPING, RoleEnum.KITCHEN
-    )),
+    current_user: User = Depends(require_roles(*STOCK_VIEW_ROLES)),
 ):
     return inventory_service.list_transactions_for_item(db, current_user, item_id)
 

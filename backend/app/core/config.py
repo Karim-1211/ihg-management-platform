@@ -16,8 +16,23 @@ class Settings(BaseSettings):
     tax_rate: float = 0.05  # 5% demo tax rate
     default_reservation_minutes: int = 90  # default table reservation duration
 
-    # Phase 15: notifications
-    email_mode: str = "DEMO"  # DEMO = never sends real email, always marks SENT instantly
+    # Phase 15: notifications.
+    #   DEMO = never contacts a provider; emails are logged and marked sent.
+    #   SMTP = really sends, via the settings below.
+    email_mode: str = "DEMO"
+
+    # SMTP delivery. Defaults target Gmail, which allows 500 messages a day
+    # at no cost. SMTP_PASSWORD must be a Google *App Password* (16
+    # characters, requires 2-Step Verification) — a normal account password
+    # is rejected by Google.
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_use_tls: bool = True
+    smtp_from_email: str | None = None
+    smtp_from_name: str = "IHG Grand Dhaka"
+    smtp_timeout_seconds: int = 20
 
     # Phase 20: AI Platform — multiple free-tier keys/providers as a fallback
     # chain, per the locked 20.1 architecture (provider fully behind the
@@ -45,6 +60,14 @@ class Settings(BaseSettings):
     def is_production(self) -> bool:
         return self.app_env.lower() == "production"
 
+    @property
+    def smtp_configured(self) -> bool:
+        return bool(self.smtp_host and self.smtp_username and self.smtp_password)
+
+    @property
+    def mail_from_address(self) -> str | None:
+        return self.smtp_from_email or self.smtp_username
+
     def validate_production_readiness(self) -> list[str]:
         """Phase 24.2: production must require appropriate secrets/config
         rather than silently falling back to development defaults. Returns
@@ -63,6 +86,8 @@ class Settings(BaseSettings):
             problems.append("CORS_ALLOWED_ORIGINS must be set to the real production frontend URL(s), not the local dev default.")
         if self.email_mode == "DEMO":
             problems.append("EMAIL_MODE is DEMO in production — confirm this is intentional (no real emails will be sent).")
+        if self.email_mode.upper() == "SMTP" and not self.smtp_configured:
+            problems.append("EMAIL_MODE is SMTP but SMTP_USERNAME / SMTP_PASSWORD are not set.")
         return problems
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")

@@ -107,6 +107,17 @@ export default function CustomerAssistantWidget() {
     setMode('menu')
   }, [pageKind])
 
+  // Silence Alice whenever the page changes, however it changed — a link,
+  // the back button, a form redirect. Previously she was only stopped when
+  // the widget itself navigated, so a half-finished table booking kept
+  // talking over the hotel checkout the guest had moved on to.
+  useEffect(() => {
+    chatMic.stop()
+    audioRef.current?.pause()
+    window.speechSynthesis?.cancel()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname])
+
   useEffect(() => {
     if (open || teaserDismissed) return
     const timer = window.setTimeout(() => setShowTeaser(true), 1500)
@@ -325,7 +336,7 @@ export default function CustomerAssistantWidget() {
                 <>
                   <button type="button" onClick={() => startDining('choose')} className={menuButton}>✨ Ask Alice to choose</button>
                   <button type="button" onClick={() => startDining('track')} className={menuButton}>🛵 Track an order</button>
-                  <button type="button" onClick={() => startDining('question')} className={menuButton}>💬 Have another question</button>
+                  <button type="button" onClick={() => startDining('question')} className={menuButton}>💬 Ask me anything</button>
                 </>
               )}
 
@@ -333,6 +344,7 @@ export default function CustomerAssistantWidget() {
                 <>
                   <button type="button" onClick={() => startDining('reserve')} className={menuButton}>🍽️ Reserve a table</button>
                   <button type="button" onClick={() => startDining('delivery')} className={menuButton}>🛵 Order delivery</button>
+                  <button type="button" onClick={() => startDining('question')} className={menuButton}>💬 Ask me anything</button>
                 </>
               )}
 

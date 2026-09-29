@@ -70,6 +70,9 @@ PROMPTS = {
     "alice-delivery-intro-question.wav": (
         "Hello, I'm Alice, your delivery concierge. What would you like to know?"
     ),
+    "alice-dining-intro-question.wav": (
+        "Hello, I'm Alice, your dining concierge. What would you like to know?"
+    ),
 
     # Delivery concierge — follow-up lines
     "alice-checking-order.wav": "One moment while I check on your order.",

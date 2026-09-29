@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import api from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
+import { requireAuth } from '../../lib/authRedirect'
 import { useAutoMic, speakThenListen, narrateThenListen, streamAssistant } from '../../lib/aliceVoice'
 import { addItemsToCart } from '../../lib/deliveryCart'
 import { deliveryStepIndex, isFinished, statusLabel, statusPillClass, formatDateTime } from '../../lib/deliveryStatus'
@@ -13,6 +14,7 @@ const LINES = {
   introDeliveryChoose: { file: '/audio/alice-delivery-intro-choose.wav', text: "Hello, I'm Alice, your delivery concierge. Tell me what you're in the mood for, and I'll find the perfect dish on our menu." },
   introDeliveryTrack: { file: '/audio/alice-delivery-intro-track.wav', text: "Hello, I'm Alice, your delivery concierge. One moment while I check on your order." },
   introDeliveryQuestion: { file: '/audio/alice-delivery-intro-question.wav', text: "Hello, I'm Alice, your delivery concierge. What would you like to know?" },
+  introDiningQuestion: { file: '/audio/alice-dining-intro-question.wav', text: "Hello, I'm Alice, your dining concierge. What would you like to know?" },
   checkingOrder: { file: '/audio/alice-checking-order.wav', text: 'One moment while I check on your order.' },
   askQuestion: { file: '/audio/alice-ask-question.wav', text: 'Of course — what would you like to know?' },
   askDate: { file: '/audio/alice-ask-dining-date.wav', text: 'Lovely. What date would you like to dine with us?' },
@@ -259,6 +261,7 @@ export default function DiningConcierge({
 
   const { user } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const audioRef = useRef(null)
   const logRef = useRef(null)
   const stepRef = useRef('mode')
@@ -299,6 +302,17 @@ export default function DiningConcierge({
   useEffect(() => { menuRef.current = menu }, [menu])
   useEffect(() => { cartRef.current = cart }, [cart])
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight }, [log, replyText])
+
+  // The concierge can be mounted inside the floating widget, which survives
+  // a page change. Stop speaking and listening the moment the route changes,
+  // so a reservation flow never follows the guest onto another page.
+  useEffect(() => {
+    runRef.current += 1
+    audioRef.current?.pause()
+    window.speechSynthesis?.cancel()
+    mic.stop()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname])
   useEffect(() => () => { audioRef.current?.pause(); window.speechSynthesis?.cancel(); mic.stop() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Deferred by one tick and cancelled on cleanup. React's development mode
@@ -318,7 +332,9 @@ export default function DiningConcierge({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [intent])
 
-  const isCustomer = user?.role === 'CUSTOMER'
+  // Menus, prices and table availability are public, so Alice helps
+  // everyone. Only reserving, ordering and order-tracking need an account.
+  const isStaff = !!user && user.role !== 'CUSTOMER'
   const today = new Date().toISOString().slice(0, 10)
 
   // Resolves only when the line has FINISHED playing naturally. If the line
@@ -374,10 +390,24 @@ export default function DiningConcierge({
   }
 
   function startQuestion(heard) {
-    begin(heard || 'I have another question', 'introDeliveryQuestion', 'askQuestion', 'question').then(() => mic.start())
+    const intro = isDelivery ? 'introDeliveryQuestion' : 'introDiningQuestion'
+    begin(heard || 'Ask me anything', intro, 'askQuestion', 'question').then(() => mic.start())
   }
 
   async function startTrack(heard) {
+    // Order tracking is the one delivery feature that needs an account —
+    // it reads the guest's own orders.
+    if (!user) {
+      const line = "I'd love to check on your order — please sign in first and I'll pull it up straight away."
+      setLog((l) => [...l, { from: 'user', text: heard || 'Track my order' }, { from: 'alice', text: line }])
+      setStep('tracked')
+      narrateThenListen(line, audioRef, voiceEnabled, () => {})
+      window.setTimeout(() => {
+        onBeforeNavigate?.()
+        requireAuth(user, navigate, location, { reason: 'Sign in to track your delivery order.' })
+      }, 2200)
+      return
+    }
     setTracked([])
     const spoken = begin(heard || 'Track my order', 'introDeliveryTrack', 'checkingOrder', 'tracking')
     const run = runRef.current
@@ -714,8 +744,13 @@ export default function DiningConcierge({
   function goReserve(table) {
     stopAll()
     const params = new URLSearchParams({ tableId: table.id, date, time, partySize: String(partySize) })
+    const target = `/restaurants/${restaurantId}/reserve?${params.toString()}`
     onBeforeNavigate?.()
-    navigate(`/restaurants/${restaurantId}/reserve?${params.toString()}`)
+    if (!requireAuth(user, navigate, location, {
+      from: target,
+      reason: `Please sign in to confirm your table. Table ${table.table_number} and your time are saved.`,
+    })) return
+    navigate(target)
   }
 
   function restart() {
@@ -741,15 +776,11 @@ export default function DiningConcierge({
     setVoiceEnabled((v) => !v)
   }
 
-  if (!isCustomer) {
+  if (isStaff) {
     return (
       <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
         <p className="text-sm text-slate-500">
-          {user
-            ? `The ${isDelivery ? 'delivery' : 'dining'} concierge is available for guest accounts.`
-            : isDelivery
-              ? 'Log in as a guest to order, track or ask Alice anything.'
-              : 'Log in as a guest to reserve a table or order with Alice.'}
+          The {isDelivery ? 'delivery' : 'dining'} concierge is available on guest accounts.
         </p>
       </div>
     )
@@ -813,7 +844,7 @@ export default function DiningConcierge({
           <div className={`grid gap-3 ${compact ? 'grid-cols-1' : 'sm:grid-cols-3'}`}>
             <button type="button" onClick={() => chooseOrder(null, 'delivery')} className={optionBtn}>✨ Ask Alice to choose</button>
             <button type="button" onClick={() => startTrack()} className={optionBtn}>🛵 Track an order</button>
-            <button type="button" onClick={() => startQuestion()} className={optionBtn}>💬 Have another question</button>
+            <button type="button" onClick={() => startQuestion()} className={optionBtn}>💬 Ask me anything</button>
           </div>
         )}
 
@@ -866,12 +897,19 @@ export default function DiningConcierge({
               <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Ask Alice anything…" className={`flex-1 rounded-xl border border-slate-300 outline-none focus:border-[#1F3A5F] ${field}`} />
               <button type="submit" disabled={!question.trim()} className={`rounded-xl bg-[#1F3A5F] font-bold text-white hover:bg-[#162f4d] disabled:opacity-50 ${btn}`}>Ask</button>
             </form>
-            {isDelivery && (
-              <div className="mt-3 flex flex-wrap justify-center gap-x-5 gap-y-1 text-xs font-bold text-[#1F3A5F]">
-                <button type="button" onClick={() => chooseOrder(null, 'delivery')} className="underline-offset-4 hover:underline">Help me choose</button>
-                <button type="button" onClick={() => startTrack()} className="underline-offset-4 hover:underline">Track my order</button>
-              </div>
-            )}
+            <div className="mt-3 flex flex-wrap justify-center gap-x-5 gap-y-1 text-xs font-bold text-[#1F3A5F]">
+              {isDelivery ? (
+                <>
+                  <button type="button" onClick={() => chooseOrder(null, 'delivery')} className="underline-offset-4 hover:underline">Help me choose</button>
+                  <button type="button" onClick={() => startTrack()} className="underline-offset-4 hover:underline">Track my order</button>
+                </>
+              ) : (
+                <>
+                  <button type="button" onClick={() => chooseReserve()} className="underline-offset-4 hover:underline">Reserve a table</button>
+                  <button type="button" onClick={() => chooseOrder(null, 'delivery')} className="underline-offset-4 hover:underline">Order delivery</button>
+                </>
+              )}
+            </div>
           </>
         )}
 

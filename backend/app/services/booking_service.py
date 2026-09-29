@@ -111,6 +111,9 @@ def create_booking(db: Session, guest: User, data: BookingCreate) -> Booking:
         db, guest.id, "CREATE_BOOKING", "booking", booking.id,
         f"Created booking {booking.booking_reference} for room {room.room_number}",
     )
+    # The confirmation email is built from this metadata, so everything the
+    # guest should see in it — the room, the length of stay, and above all
+    # their own special request — has to travel with the event.
     notification_service.dispatch(db, NotificationEvent(
         event_type=NotificationType.BOOKING_CONFIRMED,
         actor_user_id=guest.id,
@@ -122,6 +125,12 @@ def create_booking(db: Session, guest: User, data: BookingCreate) -> Booking:
             "booking_reference": booking.booking_reference,
             "check_in_date": str(booking.check_in_date),
             "check_out_date": str(booking.check_out_date),
+            "room_number": room.room_number,
+            "room_type": room_type.name if room_type else None,
+            "nights": str(nights),
+            "number_of_guests": str(booking.number_of_guests),
+            "total_amount": str(booking.total_amount),
+            "special_requests": booking.special_requests or None,
         },
     ))
     return booking
@@ -464,6 +473,9 @@ def create_booking_checkout(db: Session, guest: User, data: BookingCheckoutCreat
         booking.id,
         f"Created and paid booking {booking.booking_reference} for room {room.room_number} via {data.payment_method.value}",
     )
+    # Everything the confirmation email shows comes from this metadata —
+    # including the guest's own special request, which previously never
+    # left the database.
     notification_service.dispatch(db, NotificationEvent(
         event_type=NotificationType.BOOKING_CONFIRMED,
         actor_user_id=guest.id,
@@ -475,6 +487,12 @@ def create_booking_checkout(db: Session, guest: User, data: BookingCheckoutCreat
             "booking_reference": booking.booking_reference,
             "check_in_date": str(booking.check_in_date),
             "check_out_date": str(booking.check_out_date),
+            "room_number": room.room_number,
+            "room_type": room_type.name if room_type else None,
+            "nights": str(nights),
+            "number_of_guests": str(booking.number_of_guests),
+            "total_amount": str(total_amount),
+            "special_requests": booking.special_requests or None,
         },
     ))
     notification_service.dispatch(db, NotificationEvent(

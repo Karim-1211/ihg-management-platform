@@ -1,20 +1,44 @@
+import logging
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models.notification import Notification, NotificationChannel, NotificationStatus
+from app.models.notification import Notification, NotificationChannel, NotificationStatus, NotificationType
 from app.models.user import User
-from app.services import email_service
+from app.services import email_service, email_templates
 from app.services import notification_constants as const
+
+logger = logging.getLogger("ihg.notification_processor")
+
+
+def _attachments_for(db: Session, notification: Notification) -> list[tuple[bytes, str, str]]:
+    """An invoice email carries the invoice itself as a PDF. If it can't be
+    built, the email still goes out — a receipt in the inbox beats no email
+    at all."""
+    if notification.notification_type != NotificationType.INVOICE_CREATED:
+        return []
+    if notification.related_entity_type != "invoice" or not notification.related_entity_id:
+        return []
+    try:
+        from app.services import invoice_pdf_service
+        result = invoice_pdf_service.build_invoice_pdf(db, notification.related_entity_id)
+        if not result:
+            return []
+        content, filename = result
+        return [(content, filename, "pdf")]
+    except Exception:
+        logger.exception("Could not attach invoice PDF to notification %s", notification.id)
+        return []
 
 
 def process_pending_emails(db: Session, limit: int = 50) -> dict:
     """Plain callable function — NOT tied to FastAPI startup/lifespan.
-    Invoked via the manual SUPER_ADMIN endpoint for now; production
-    scheduling (cron/worker) is deferred to a later deployment phase.
+    Invoked both by the background email worker and by the manual
+    SUPER_ADMIN endpoint.
 
     Uses SELECT ... FOR UPDATE SKIP LOCKED so multiple concurrent callers
-    (e.g. the manual endpoint fired twice) never double-process the same row."""
+    (e.g. the worker and the manual endpoint at once) never double-process
+    the same row."""
     pending = (
         db.query(Notification)
         .filter(Notification.channel == NotificationChannel.EMAIL, Notification.status == NotificationStatus.PENDING)
@@ -37,7 +61,19 @@ def process_pending_emails(db: Session, limit: int = 50) -> dict:
             failed_count += 1
             continue
 
-        success, error = email_service.send_email(recipient.email, notification.title, notification.message)
+        # The in-app notification is one line; the email gets the full,
+        # branded version built from the same event metadata.
+        try:
+            subject, html_body, text_body = email_templates.build(notification, recipient)
+        except Exception:
+            logger.exception("Email template failed for notification %s; using the plain message", notification.id)
+            subject, html_body, text_body = notification.title, None, notification.message
+
+        success, error = email_service.send_email(
+            recipient.email, subject, text_body,
+            html_body=html_body,
+            attachments=_attachments_for(db, notification),
+        )
 
         if success:
             notification.status = NotificationStatus.SENT

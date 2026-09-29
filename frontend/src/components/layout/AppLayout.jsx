@@ -109,7 +109,9 @@ export default function AppLayout({ children }) {
 
       <SiteFooter />
 
-      {user?.role === 'CUSTOMER' && <CustomerAssistantWidget />}
+      {/* Alice is available to everyone browsing, signed in or not. She asks
+          for sign-in only at the point of booking or ordering. */}
+      {(!user || user.role === 'CUSTOMER') && <CustomerAssistantWidget />}
     </div>
   )
 }

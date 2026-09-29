@@ -1,6 +1,7 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import NotificationBell from '../notifications/NotificationBell'
+import Brand from './Brand'
 
 function IconHotel() {
   return (
@@ -190,9 +191,9 @@ export default function Sidebar({ mobileOpen = false, onClose = () => {} }) {
       >
         <div className="h-[72px] px-5 border-b border-white/10 flex items-center justify-between shrink-0">
           <Link to="/" onClick={onClose} className="flex items-center gap-3">
-            <span className="text-2xl font-extrabold tracking-tight text-white">IHG</span>
+            <Brand variant="dark" size="sm" showWordmark={false} />
             <span className="h-5 w-px bg-white/20" />
-            <span className="text-[10px] font-semibold tracking-[0.15em] uppercase text-white/40">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.15em] text-white/40">
               Management
             </span>
           </Link>

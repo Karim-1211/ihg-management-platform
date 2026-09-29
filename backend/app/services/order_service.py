@@ -137,6 +137,16 @@ def _attach_display_fields(db: Session, order: Order) -> Order:
         if menu_item:
             item.menu_item_name = menu_item.name
     order.items = items
+    # Total dishes, not lines — "1 item" for a line of quantity 12 misleads
+    # whoever reads the order list.
+    order.item_count = sum(int(i.quantity) for i in items)
+    order.customer_name = None
+    order.customer_phone = None
+    if order.customer_id:
+        customer = db.query(User).filter(User.id == order.customer_id).first()
+        if customer:
+            order.customer_name = f"{customer.first_name} {customer.last_name}"
+            order.customer_phone = customer.phone
     if order.table_id:
         table = db.query(RestaurantTable).filter(RestaurantTable.id == order.table_id).first()
         if table:
