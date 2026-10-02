@@ -144,6 +144,15 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
     speakThenListen(line.file, line.text, activeAudioRef, voiceEnabled, () => mic.start())
   }
 
+  // Silences Alice completely — the audio element lives in this hook's ref,
+  // so a caller cannot reach it any other way. Used when the guest opens a
+  // room to read about it: she should not carry on asking about dates.
+  function stopAll() {
+    activeAudioRef.current?.pause()
+    window.speechSynthesis?.cancel()
+    mic.stop()
+  }
+
   const today = new Date().toISOString().slice(0, 10)
   const allShownRooms = [...primaryRooms, ...secondaryRooms]
 
@@ -368,6 +377,6 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
     confirmText, setConfirmText,
     voiceEnabled, toggleVoice, mic,
     submitPreferenceValue, submitCheckInValue, submitCheckOutValue, submitGuestsValue, submitConfirmValue,
-    startOver, bookRoom, startVoice,
+    startOver, bookRoom, startVoice, stopAll,
   }
 }

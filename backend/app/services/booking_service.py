@@ -143,11 +143,53 @@ def get_booking_or_404(db: Session, booking_id: uuid.UUID) -> Booking:
     return booking
 
 
+def _attach_booking_display_fields(db: Session, booking: Booking) -> Booking:
+    """Resolves the room and the guest account for display. Front desk staff
+    scan this list by guest name and room number, neither of which is stored
+    on the booking itself for bookings made before checkout snapshots."""
+    booking.room_number = None
+    booking.room_type_name = None
+    booking.account_name = None
+    booking.account_email = None
+    booking.nights = (booking.check_out_date - booking.check_in_date).days
+
+    room = db.query(Room).filter(Room.id == booking.room_id).first()
+    if room:
+        booking.room_number = room.room_number
+        room_type = db.query(RoomType).filter(RoomType.id == room.room_type_id).first()
+        if room_type:
+            booking.room_type_name = room_type.name
+
+    guest = db.query(User).filter(User.id == booking.guest_id).first()
+    if guest:
+        booking.account_name = f"{guest.first_name} {guest.last_name}"
+        booking.account_email = guest.email
+
+    # The invoice is the record of money; the booking only knows the room
+    # charge. Without this a discounted stay still reads at full price.
+    from app.models.billing import Invoice, InvoiceType
+    booking.invoice_total = None
+    booking.invoice_discount = None
+    booking.invoice_status = None
+    invoice = (
+        db.query(Invoice)
+        .filter(Invoice.booking_id == booking.id, Invoice.invoice_type == InvoiceType.HOTEL)
+        .first()
+    )
+    if invoice:
+        booking.invoice_total = float(invoice.total_amount)
+        booking.invoice_discount = float(invoice.discount_amount or 0)
+        booking.invoice_status = invoice.status.value
+
+    return booking
+
+
 def list_bookings(db: Session, guest_id: uuid.UUID | None = None) -> list[Booking]:
     query = db.query(Booking)
     if guest_id:
         query = query.filter(Booking.guest_id == guest_id)
-    return query.order_by(Booking.created_at.desc()).all()
+    bookings = query.order_by(Booking.created_at.desc()).all()
+    return [_attach_booking_display_fields(db, b) for b in bookings]
 
 
 def check_in_booking(db: Session, booking_id: uuid.UUID, current_user: User) -> Booking:
@@ -405,7 +447,20 @@ def create_booking_checkout(db: Session, guest: User, data: BookingCheckoutCreat
     room_charge = Decimal(str(room_type.base_price)) * nights
     tax_rate = business_rule_service.get_tax_rate(db)
     tax_amount = (room_charge * tax_rate).quantize(Decimal("0.01"))
-    total_amount = (room_charge + tax_amount).quantize(Decimal("0.01"))
+
+    # Validated BEFORE anything is created: a bad code must stop the booking
+    # with nothing reserved and nothing charged.
+    discount_amount = Decimal("0.00")
+    promo_label = None
+    promo_result = None
+    if getattr(data, "promo_code", None):
+        from app.models.promo import PromoScope
+        from app.services import promo_service
+        promo_result = promo_service.validate_code(db, data.promo_code, PromoScope.HOTEL, room_charge)
+        discount_amount = promo_result["discount_amount"]
+        promo_label = promo_result["label"]
+
+    total_amount = (room_charge + tax_amount - discount_amount).quantize(Decimal("0.01"))
 
     booking = Booking(
         booking_reference=generate_booking_reference(),
@@ -433,13 +488,25 @@ def create_booking_checkout(db: Session, guest: User, data: BookingCheckoutCreat
         service_charge=Decimal("0.00"),
         subtotal=room_charge,
         tax_amount=tax_amount,
-        discount_amount=Decimal("0.00"),
+        discount_amount=discount_amount,
         total_amount=total_amount,
         amount_paid=total_amount,
         status=InvoiceStatus.PAID,
     )
     db.add(invoice)
     db.flush()
+
+    # Spent inside this transaction: if the commit below fails, the code is
+    # not consumed.
+    if promo_result:
+        from app.services import promo_service
+        promo_service.redeem(
+            db,
+            promo_id=promo_result["promo"].id,
+            amount_discounted=discount_amount,
+            customer_id=guest.id,
+            booking_id=booking.id,
+        )
 
     payment = Payment(
         payment_number=generate_payment_number(),
@@ -527,4 +594,6 @@ def create_booking_checkout(db: Session, guest: User, data: BookingCheckoutCreat
         "payment_method": payment.method,
         "amount_paid": float(payment.amount),
         "total_amount": float(invoice.total_amount),
+        "discount_amount": float(discount_amount),
+        "promo_label": promo_label,
     }

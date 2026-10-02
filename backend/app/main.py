@@ -11,7 +11,7 @@ from app.routers import (
     auth, hotels, bookings, service_requests, billing, audit,
     restaurants, reservations, orders, restaurant_billing, delivery, inventory,
     notifications, dashboard, reports, business_rules, ai_customer_assistant, ai_staff_assistant,
-    booking_import, media, newsletter, delivery_checkout,
+    booking_import, media, newsletter, delivery_checkout, promo,
 )
 from app.services import email_worker
 
@@ -71,6 +71,7 @@ app.include_router(booking_import.router)
 app.include_router(media.router)
 app.include_router(newsletter.router)
 app.include_router(delivery_checkout.router)
+app.include_router(promo.router)
 
 
 @app.get("/health")

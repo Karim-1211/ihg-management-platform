@@ -28,6 +28,7 @@ export default function RoomFinderAssistant({
   defaultCheckOut = '',
   defaultGuests = 2,
   startVoiceSignal = 0,
+  silenceSignal = 0,
 }) {
   const { user } = useAuth()
   // Alice helps everyone. Room availability, prices and recommendations are
@@ -47,6 +48,15 @@ export default function RoomFinderAssistant({
   // or arrives from "View rooms & book". That click satisfies the browser's
   // requirement that audio follow a user interaction, so Alice can simply
   // start talking — no "turn on voice" button for the guest to find.
+  // A counter, not a flag: it increments every time the page wants silence,
+  // so repeated requests each fire. A zero-value flag never could, since
+  // that is also the starting value.
+  useEffect(() => {
+    if (!silenceSignal) return
+    flow.stopAll()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [silenceSignal])
+
   useEffect(() => {
     if (!startVoiceSignal || voiceStarted || isStaff || !hotelId) return
     if (!flow.voiceEnabled) return

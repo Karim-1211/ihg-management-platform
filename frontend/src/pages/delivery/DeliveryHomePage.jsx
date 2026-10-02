@@ -4,6 +4,7 @@ import api from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import AppLayout from '../../components/layout/AppLayout'
 import DiningConcierge from '../../components/restaurants/DiningConcierge'
+import PromoBand from '../../components/marketing/PromoBand'
 import { useDeliveryCart, getDeliveryCart, setItemQuantity, clearDeliveryCart, cartCount } from '../../lib/deliveryCart'
 import { formatMoney } from '../../lib/deliveryStatus'
 
@@ -531,6 +532,8 @@ export default function DeliveryHomePage() {
             </div>
           </div>
         </section>
+
+        <PromoBand kind="delivery" onCta={() => scrollTo('the-menu')} />
 
         <section className="bg-white px-4 py-24 sm:px-6 lg:px-8">
           <div className={`mx-auto ${CONTENT_MAX_W}`}>

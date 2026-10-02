@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import api from '../../services/api'
 import AppLayout from '../../components/layout/AppLayout'
 import DiningConcierge from '../../components/restaurants/DiningConcierge'
+import ReserveTablePanel from '../../components/restaurants/ReserveTablePanel'
+import PromoBand from '../../components/marketing/PromoBand'
 
 const CONTENT_MAX_W = 'max-w-[1280px]'
 
@@ -267,6 +269,7 @@ function MenuBoard({ menu, loading, dietFilter, setDietFilter }) {
 }
 
 export default function RestaurantsPage() {
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
 
   const [restaurants, setRestaurants] = useState([])
@@ -324,11 +327,15 @@ export default function RestaurantsPage() {
     return prices.length ? Math.min(...prices) : null
   }, [availableItems])
 
+  function scrollTo(id) {
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  // Alice is a shortcut for guests who want one — never the only route.
+  // Every action here works without her.
   function startIntent(which) {
     setIntent(which)
-    window.setTimeout(() => {
-      document.getElementById('dining-concierge')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    }, 80)
+    window.setTimeout(() => scrollTo('dining-concierge'), 80)
   }
 
   return (
@@ -343,14 +350,14 @@ export default function RestaurantsPage() {
             <h1 className="mt-5 max-w-4xl font-serif text-5xl leading-[1.04] text-white sm:text-7xl">{active?.name || 'Dine with us'}</h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-white/75 sm:text-lg">A room worth lingering in, a menu worth returning for.</p>
             <div className="mt-8 flex flex-wrap justify-center gap-3">
-              <button type="button" onClick={() => startIntent('reserve')} className="rounded-xl bg-[#FF2147] px-7 py-3.5 text-sm font-bold uppercase tracking-[0.06em] text-white hover:bg-[#dc1539]">
+              <button type="button" onClick={() => scrollTo('reserve-a-table')} className="rounded-xl bg-[#FF2147] px-8 py-3.5 text-sm font-bold uppercase tracking-[0.06em] text-white shadow-lg transition hover:-translate-y-0.5 hover:bg-[#dc1539]">
                 Reserve a table
               </button>
-              <button type="button" onClick={() => startIntent('delivery')} className="rounded-xl border border-white/40 bg-white/10 px-7 py-3.5 text-sm font-bold uppercase tracking-[0.06em] text-white backdrop-blur-sm hover:bg-white/20">
+              <button type="button" onClick={() => navigate('/delivery')} className="rounded-xl bg-white px-8 py-3.5 text-sm font-bold uppercase tracking-[0.06em] text-[#1F3A5F] shadow-lg transition hover:-translate-y-0.5 hover:bg-[#F0EBE3]">
                 Order delivery
               </button>
             </div>
-            <button type="button" onClick={() => document.getElementById('the-menu')?.scrollIntoView({ behavior: 'smooth' })} className="mt-5 text-xs font-bold uppercase tracking-[0.18em] text-white/70 underline underline-offset-4 hover:text-white">
+            <button type="button" onClick={() => scrollTo('the-menu')} className="mt-5 text-xs font-bold uppercase tracking-[0.18em] text-white/70 underline underline-offset-4 hover:text-white">
               View the menu
             </button>
             <span className="absolute bottom-7 animate-bounce text-white/50"><Icon name="arrowDown" size={20} /></span>
@@ -424,6 +431,8 @@ export default function RestaurantsPage() {
           </div>
         </section>
 
+        <PromoBand kind="restaurant" onCta={() => scrollTo('reserve-a-table')} />
+
         <section className="bg-white px-4 py-24 sm:px-6 lg:px-8">
           <div className={`mx-auto ${CONTENT_MAX_W}`}>
             <div className="max-w-2xl">
@@ -432,9 +441,9 @@ export default function RestaurantsPage() {
             </div>
             <div className="mt-14 grid gap-8 md:grid-cols-3">
               {[
-                { icon: 'table', eyebrow: 'Reserve', title: 'Book a table', copy: 'Pick your date, time and party size — we check live table availability, so what you see is genuinely free.', cta: 'Reserve now', action: () => startIntent('reserve') },
-                { icon: 'dish', eyebrow: 'Dine in', title: 'Order at the table', copy: 'Browse the full menu before you arrive, and order from your seat without waiting to catch a waiter.', cta: 'See the menu', action: () => document.getElementById('the-menu')?.scrollIntoView({ behavior: 'smooth' }) },
-                { icon: 'scooter', eyebrow: 'Deliver', title: 'Bring it to me', copy: "The same kitchen, brought to your door — or straight to your room if you're staying with us.", cta: 'Order delivery', action: () => startIntent('delivery') },
+                { icon: 'table', eyebrow: 'Reserve', title: 'Book a table', copy: 'Pick your date, time and party size — we check the live floor plan, so what you see is genuinely free.', cta: 'Book a table', action: () => scrollTo('reserve-a-table') },
+                { icon: 'dish', eyebrow: 'Dine in', title: 'Order at the table', copy: 'Browse the full menu before you arrive, and order from your seat without waiting to catch a waiter.', cta: 'See the menu', action: () => scrollTo('the-menu') },
+                { icon: 'scooter', eyebrow: 'Deliver', title: 'Bring it to me', copy: "The same kitchen, brought to your door — or straight to your room if you're staying with us.", cta: 'Order delivery', action: () => navigate('/delivery') },
               ].map((card) => (
                 <div key={card.title} className="flex flex-col rounded-2xl border border-slate-200 bg-white p-8 transition hover:border-[#1F3A5F]/25 hover:shadow-lg">
                   <span className="flex h-12 w-12 items-center justify-center rounded-full bg-[#FF2147]/10 text-[#FF2147]"><Icon name={card.icon} size={22} /></span>
@@ -448,7 +457,25 @@ export default function RestaurantsPage() {
           </div>
         </section>
 
-        <section id="dining-concierge" className="bg-[#F5F2ED] px-4 py-24 sm:px-6 lg:px-8">
+        {/* The booking form comes BEFORE the concierge, deliberately: a guest
+            who simply wants a table should never have to scroll past a
+            conversation to find one. */}
+        {/* Full-width warm band with the card in white, the same treatment as
+            the menu section — so the booking area reads as a place in the
+            restaurant rather than a form floating on the page. */}
+        <section id="reserve-a-table" className="scroll-mt-[76px] bg-[#F0EBE3] px-4 py-24 sm:px-6 lg:px-8">
+          <div className="mx-auto max-w-[1180px]">
+            {active && (
+              <ReserveTablePanel
+                restaurantId={active.id}
+                restaurantName={active.name}
+                onAskAlice={() => startIntent('reserve')}
+              />
+            )}
+          </div>
+        </section>
+
+        <section id="dining-concierge" className="scroll-mt-[76px] bg-[#F5F2ED] px-4 py-24 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-[1100px]">
             {active && (
               <DiningConcierge

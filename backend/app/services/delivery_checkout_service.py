@@ -15,8 +15,11 @@ from types import SimpleNamespace
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
 
+from decimal import Decimal
+
 from app.models.delivery import Delivery
-from app.models.restaurant import MenuCategory, MenuItem, OrderType
+from app.models.promo import PromoScope
+from app.models.restaurant import MenuCategory, MenuItem, Order, OrderType
 from app.models.user import RoleEnum, User
 from app.schemas.delivery_checkout import (
     CHECKOUT_PAYMENT_METHODS,
@@ -27,7 +30,7 @@ from app.schemas.delivery_checkout import (
     DeliveryQuoteResponse,
 )
 from app.schemas.restaurant import OrderCreate, OrderItemCreate
-from app.services import order_service, restaurant_billing_service
+from app.services import order_service, promo_service, restaurant_billing_service
 from app.services.restaurant_service import get_restaurant_or_404
 
 
@@ -78,6 +81,11 @@ def quote_delivery(db: Session, data: DeliveryQuoteRequest) -> DeliveryQuoteResp
         for oi in pricing["order_items"]
     ]
 
+    from app.services import business_rule_service
+    prep = business_rule_service.get_delivery_preparation_minutes(db, restaurant.id)
+    travel = business_rule_service.get_delivery_travel_minutes(db, restaurant.id)
+    base = prep + travel
+
     return DeliveryQuoteResponse(
         restaurant_id=restaurant.id,
         lines=lines,
@@ -87,6 +95,10 @@ def quote_delivery(db: Session, data: DeliveryQuoteRequest) -> DeliveryQuoteResp
         service_charge_amount=float(pricing["service_charge_amount"]),
         discount_amount=float(pricing["discount_amount"]),
         total_amount=float(pricing["total_amount"]),
+        # A range rather than a single figure: a precise number the kitchen
+        # cannot guarantee is a promise waiting to be broken.
+        estimated_minutes_min=base,
+        estimated_minutes_max=base + 10,
     )
 
 
@@ -96,12 +108,50 @@ def checkout_delivery(db: Session, current_user: User, data: DeliveryCheckoutReq
     if data.payment_method not in CHECKOUT_PAYMENT_METHODS:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="Please choose Visa, Mastercard or PayPal.")
 
+    lines = _merge_lines(data.items)
+
+    # The promo code is checked BEFORE anything is created. Validating it
+    # afterwards meant a bad code raised an error with the order already
+    # placed — and the guest was charged anyway.
+    promo_result = None
+    if data.promo_code:
+        preview = order_service.price_order_lines(db, data.restaurant_id, lines)
+        promo_result = promo_service.validate_code(
+            db, data.promo_code, PromoScope.DELIVERY, Decimal(str(preview["subtotal"]))
+        )
+
     order = order_service.create_order(db, current_user, OrderCreate(
         restaurant_id=data.restaurant_id,
         order_type=OrderType.DELIVERY,
         delivery_address=data.delivery_address,
-        items=_merge_lines(data.items),
+        items=lines,
     ))
+
+    discount_amount = Decimal("0")
+    promo_label = None
+    if promo_result:
+        # Re-derive against the order's own subtotal, so the discount matches
+        # what was actually charged rather than the preview.
+        locked = db.query(Order).filter(Order.id == order.id).with_for_update().first()
+        subtotal = Decimal(str(locked.subtotal))
+        percent = Decimal(str(promo_result["percent_off"]))
+        discount_amount = (subtotal * percent).quantize(Decimal("0.01"))
+        promo_label = promo_result["label"]
+
+        tax = Decimal(str(locked.tax_amount))
+        service = Decimal(str(locked.service_charge_amount))
+        locked.discount_amount = discount_amount
+        locked.total_amount = (subtotal + tax + service - discount_amount).quantize(Decimal("0.01"))
+
+        promo_service.redeem(
+            db,
+            promo_id=promo_result["promo"].id,
+            amount_discounted=discount_amount,
+            customer_id=current_user.id,
+            order_id=order.id,
+        )
+        db.commit()
+        db.refresh(order)
 
     # The rider's contact details live on the existing Delivery record.
     contact = [f"Phone: {data.contact_phone}"]
@@ -126,4 +176,6 @@ def checkout_delivery(db: Session, current_user: User, data: DeliveryCheckoutReq
         payment_number=payment.payment_number,
         payment_status=payment.status.value,
         payment_method=payment.method.value,
+        discount_amount=float(discount_amount),
+        promo_label=promo_label,
     )

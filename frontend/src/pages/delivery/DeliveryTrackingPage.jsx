@@ -173,6 +173,12 @@ export default function DeliveryTrackingPage() {
                 <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{formatMoney(order.subtotal)}</span></div>
                 {Number(order.tax_amount) > 0 && <div className="flex justify-between text-slate-500"><span>Tax</span><span>{formatMoney(order.tax_amount)}</span></div>}
                 {Number(order.service_charge_amount) > 0 && <div className="flex justify-between text-slate-500"><span>Service charge</span><span>{formatMoney(order.service_charge_amount)}</span></div>}
+                {Number(order.discount_amount) > 0 && (
+                  <div className="flex justify-between font-semibold text-emerald-600">
+                    <span>Subscriber discount</span>
+                    <span>−{formatMoney(order.discount_amount)}</span>
+                  </div>
+                )}
                 <div className="flex items-baseline justify-between border-t border-slate-100 pt-3">
                   <span className="font-semibold text-[#1F3A5F]">Total</span>
                   <span className="font-serif text-3xl text-[#1F3A5F]">{formatMoney(order.total_amount)}</span>

@@ -4,6 +4,7 @@ import { useAuth } from '../../context/AuthContext'
 import Navbar from './Navbar'
 import Sidebar from './Sidebar'
 import CustomerAssistantWidget from '../ai/CustomerAssistantWidget'
+import SubscribePopup from '../marketing/SubscribePopup'
 import StaffAssistantWidget from '../ai/StaffAssistantWidget'
 import SiteFooter from './SiteFooter'
 
@@ -112,6 +113,8 @@ export default function AppLayout({ children }) {
       {/* Alice is available to everyone browsing, signed in or not. She asks
           for sign-in only at the point of booking or ordering. */}
       {(!user || user.role === 'CUSTOMER') && <CustomerAssistantWidget />}
+      {/* Guest-facing only: staff have no use for a newsletter invitation. */}
+      {(!user || user.role === 'CUSTOMER') && <SubscribePopup />}
     </div>
   )
 }

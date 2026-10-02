@@ -239,8 +239,24 @@ function BookingsTab({ bookings, myRequests, onDataChange }) {
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div>
               <p className="font-bold text-navy">{b.booking_reference}</p>
-              <p className="text-gray-500 text-sm">{b.check_in_date} → {b.check_out_date} · {b.number_of_guests} guest(s)</p>
-              <p className="text-gray-700 font-medium mt-1">${b.total_amount}</p>
+              <p className="text-gray-500 text-sm">
+                {b.room_number ? `Room ${b.room_number}` : ''}
+                {b.room_type_name ? ` · ${b.room_type_name}` : ''}
+              </p>
+              <p className="text-gray-500 text-sm">
+                {b.check_in_date} → {b.check_out_date} · {b.nights || 0} night{b.nights === 1 ? '' : 's'} · {b.number_of_guests} guest(s)
+              </p>
+              {/* The invoice total is what the guest paid; the booking's own
+                  total_amount is the room charge before tax and discount. */}
+              <p className="text-gray-700 font-bold mt-1.5">
+                ${Number(b.invoice_total ?? b.total_amount).toFixed(2)}
+                {b.invoice_total != null && <span className="ml-1.5 text-xs font-normal text-gray-400">paid</span>}
+              </p>
+              {Number(b.invoice_discount) > 0 && (
+                <p className="mt-0.5 text-xs font-semibold text-green-600">
+                  Subscriber discount −${Number(b.invoice_discount).toFixed(2)}
+                </p>
+              )}
             </div>
             <div className="flex items-center gap-3">
               <StatusBadge label={b.status} colorMap={BOOKING_STATUS_COLORS} />

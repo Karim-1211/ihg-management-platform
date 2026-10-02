@@ -251,6 +251,16 @@ def update_order_status(db: Session, current_user: User, order_id: uuid.UUID, ne
             table.status = table.status.__class__.CLEANING
     db.commit()
     db.refresh(order)
+    # The kitchen's own progress matters to the guest too — confirmed and
+    # preparing were previously silent, so a delivery order appeared to sit
+    # untouched until it was ready.
+    if new_status in (OrderStatus.CONFIRMED, OrderStatus.PREPARING) and order.order_type == OrderType.DELIVERY:
+        notification_service.dispatch(db, NotificationEvent(
+            event_type=NotificationType.ORDER_CREATED, actor_user_id=current_user.id, entity_type="order",
+            entity_id=order.id, restaurant_id=order.restaurant_id,
+            metadata={"order_number": order.order_number, "customer_id": str(order.customer_id) if order.customer_id else None},
+        ))
+
     if new_status == OrderStatus.READY:
         notification_service.dispatch(db, NotificationEvent(
             event_type=NotificationType.ORDER_READY, actor_user_id=current_user.id, entity_type="order",

@@ -107,6 +107,7 @@ class BookingCheckoutCreate(BaseModel):
     guest_phone: str | None = Field(default=None, max_length=30)
     special_requests: str | None = Field(default=None, max_length=2000)
     payment_method: PaymentMethod
+    promo_code: str | None = Field(default=None, max_length=32)
 
 
 class BookingResponse(BaseModel):
@@ -117,6 +118,8 @@ class BookingResponse(BaseModel):
     check_in_date: date
     check_out_date: date
     number_of_guests: int
+    # Snapshot taken at checkout — empty on bookings made before that flow
+    # existed, which is why the account fields below are resolved too.
     guest_name: str | None = None
     guest_email: str | None = None
     guest_phone: str | None = None
@@ -124,6 +127,19 @@ class BookingResponse(BaseModel):
     total_amount: float
     special_requests: str | None
     created_at: datetime
+    # Resolved for display so the bookings list doesn't need a request per
+    # booking to show who is staying and where.
+    room_number: str | None = None
+    room_type_name: str | None = None
+    account_name: str | None = None
+    account_email: str | None = None
+    nights: int = 0
+    # total_amount above is the ROOM CHARGE, before tax and discount. What a
+    # guest wants to see is what they actually paid, which lives on the
+    # invoice — resolved here so no page has to fetch invoices separately.
+    invoice_total: float | None = None
+    invoice_discount: float | None = None
+    invoice_status: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -135,6 +151,8 @@ class BookingCheckoutResponse(BaseModel):
     payment_method: PaymentMethod
     amount_paid: float
     total_amount: float
+    discount_amount: float = 0
+    promo_label: str | None = None
 
 
 # ---------- Housekeeping ----------

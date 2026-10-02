@@ -36,6 +36,10 @@ class DeliveryQuoteResponse(BaseModel):
     service_charge_amount: float
     discount_amount: float
     total_amount: float
+    # Configured by a manager, never guessed — see DELIVERY_PREPARATION_MINUTES
+    # and DELIVERY_TRAVEL_MINUTES.
+    estimated_minutes_min: int = 0
+    estimated_minutes_max: int = 0
 
 
 class DeliveryCheckoutRequest(DeliveryQuoteRequest):
@@ -43,6 +47,7 @@ class DeliveryCheckoutRequest(DeliveryQuoteRequest):
     contact_phone: str = Field(min_length=6, max_length=30)
     delivery_notes: str | None = Field(default=None, max_length=500)
     payment_method: PaymentMethod
+    promo_code: str | None = Field(default=None, max_length=32)
 
     @field_validator("delivery_address", "contact_phone")
     @classmethod
@@ -68,3 +73,5 @@ class DeliveryCheckoutResponse(BaseModel):
     payment_number: str
     payment_status: str
     payment_method: str
+    discount_amount: float = 0
+    promo_label: str | None = None

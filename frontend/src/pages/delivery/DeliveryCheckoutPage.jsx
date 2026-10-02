@@ -4,6 +4,7 @@ import api from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
 import AppLayout from '../../components/layout/AppLayout'
 import { useDeliveryCart, setItemQuantity, removeItemsFromCart, clearDeliveryCart, cartCount } from '../../lib/deliveryCart'
+import PromoCodeField from '../../components/checkout/PromoCodeField'
 import { formatMoney } from '../../lib/deliveryStatus'
 
 const METHODS = [
@@ -55,6 +56,8 @@ export default function DeliveryCheckoutPage() {
 
   const [address, setAddress] = useState('')
   const [phone, setPhone] = useState(user?.phone || '')
+  const [stay, setStay] = useState(null)
+  const [deliverToRoom, setDeliverToRoom] = useState(false)
   const [notes, setNotes] = useState('')
   const [method, setMethod] = useState('VISA')
   const [cardName, setCardName] = useState(user ? `${user.first_name || ''} ${user.last_name || ''}`.trim() : '')
@@ -66,6 +69,7 @@ export default function DeliveryCheckoutPage() {
   const [errors, setErrors] = useState({})
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
+  const [promo, setPromo] = useState(null)
 
   const itemsKey = JSON.stringify(cart.items)
 
@@ -75,6 +79,31 @@ export default function DeliveryCheckoutPage() {
       .then((res) => setRestaurantName((res.data || []).find((r) => r.id === cart.restaurantId)?.name || ''))
       .catch(() => {})
   }, [cart.restaurantId])
+
+  // A guest already staying in the hotel shouldn't have to type an address
+  // they're standing in. This is where the hotel and delivery sides of the
+  // platform actually meet.
+  useEffect(() => {
+    if (!user) return
+    api.get('/bookings/my/active-stay')
+      .then((res) => {
+        if (!res.data?.has_active_stay) return
+        setStay(res.data)
+        setDeliverToRoom(true)
+      })
+      .catch(() => {})
+  }, [user])
+
+  useEffect(() => {
+    if (!deliverToRoom || !stay) return
+    const parts = [
+      `Room ${stay.room_number}`,
+      stay.room_type_name,
+      stay.hotel_name,
+      stay.hotel_address,
+    ].filter(Boolean)
+    setAddress(parts.join(', '))
+  }, [deliverToRoom, stay])
 
   // Totals always come from the server — the same pricing code that will
   // create the order — so what the guest sees is exactly what they pay.
@@ -141,6 +170,7 @@ export default function DeliveryCheckoutPage() {
         contact_phone: phone.trim(),
         delivery_notes: notes.trim() || null,
         payment_method: method,
+        promo_code: promo?.code || null,
       })
       clearDeliveryCart()
       navigate(`/delivery/orders/${res.data.order_id}`, { replace: true, state: { justPlaced: true, receipt: res.data } })
@@ -188,8 +218,47 @@ export default function DeliveryCheckoutPage() {
                 <h2 className="font-serif text-2xl text-[#1F3A5F]">Where should we deliver?</h2>
               </div>
               <div className="mt-7 space-y-5">
-                <Field label="Delivery address" error={errors.address}>
-                  <textarea rows={3} value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street, area, building, flat — or your room number if you're staying with us" className={inputClass(errors.address)} />
+                {stay && (
+                  <div className={`rounded-2xl border-2 p-5 transition ${deliverToRoom ? 'border-[#FF2147] bg-[#FF2147]/[0.04]' : 'border-slate-200'}`}>
+                    <label className="flex cursor-pointer items-start gap-3.5">
+                      <input
+                        type="checkbox"
+                        checked={deliverToRoom}
+                        onChange={(e) => {
+                          setDeliverToRoom(e.target.checked)
+                          if (!e.target.checked) setAddress('')
+                        }}
+                        className="mt-1 h-5 w-5 shrink-0 rounded border-slate-300 accent-[#FF2147]"
+                      />
+                      <span className="min-w-0">
+                        <span className="flex flex-wrap items-center gap-2">
+                          <span className="text-[15px] font-bold text-[#1F3A5F]">Deliver to my room</span>
+                          <span className="rounded-full bg-[#FF2147] px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-white">
+                            You're staying with us
+                          </span>
+                        </span>
+                        <span className="mt-1.5 block text-sm leading-6 text-slate-600">
+                          Room {stay.room_number}
+                          {stay.room_type_name ? ` · ${stay.room_type_name}` : ''}
+                          {stay.hotel_name ? ` · ${stay.hotel_name}` : ''}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-slate-400">
+                          Booking {stay.booking_reference} · until {stay.check_out_date}
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                )}
+
+                <Field label={deliverToRoom ? 'Delivering to' : 'Delivery address'} error={errors.address}>
+                  <textarea
+                    rows={3}
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    readOnly={deliverToRoom}
+                    placeholder="Street, area, building, flat…"
+                    className={`${inputClass(errors.address)} ${deliverToRoom ? 'bg-slate-50 text-slate-500' : ''}`}
+                  />
                 </Field>
                 <div className="grid gap-5 sm:grid-cols-2">
                   <Field label="Phone for your rider" error={errors.phone}>
@@ -261,6 +330,18 @@ export default function DeliveryCheckoutPage() {
                 <Link to="/delivery" className="text-xs font-semibold text-slate-400 underline hover:text-[#1F3A5F]">Add more</Link>
               </div>
 
+              {quote?.estimated_minutes_min > 0 && (
+                <div className="mt-4 flex items-center gap-2.5 rounded-xl bg-[#F5F2ED] px-4 py-3">
+                  <svg className="h-4 w-4 shrink-0 text-[#FF2147]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="1.8">
+                    <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" strokeLinecap="round" />
+                  </svg>
+                  <span className="text-sm text-slate-600">
+                    Typically <span className="font-bold text-[#1F3A5F]">{quote.estimated_minutes_min}–{quote.estimated_minutes_max} minutes</span>
+                    {deliverToRoom ? ' to your room' : ''}
+                  </span>
+                </div>
+              )}
+
               <div className="mt-5 space-y-4">
                 {lines.map((line) => (
                   <div key={line.menu_item_id} className="flex items-start justify-between gap-3">
@@ -283,12 +364,29 @@ export default function DeliveryCheckoutPage() {
                   <div className="flex justify-between text-slate-500"><span>Subtotal</span><span>{formatMoney(quote.subtotal)}</span></div>
                   {quote.tax_amount > 0 && <div className="flex justify-between text-slate-500"><span>Tax</span><span>{formatMoney(quote.tax_amount)}</span></div>}
                   {quote.service_charge_amount > 0 && <div className="flex justify-between text-slate-500"><span>Service charge</span><span>{formatMoney(quote.service_charge_amount)}</span></div>}
-                  {quote.discount_amount > 0 && <div className="flex justify-between text-emerald-600"><span>Discount</span><span>−{formatMoney(quote.discount_amount)}</span></div>}
+                  {promo && (
+                    <div className="flex justify-between text-emerald-600">
+                      <span>{promo.label}</span>
+                      <span>−{formatMoney(promo.discount_amount)}</span>
+                    </div>
+                  )}
                   <div className="flex items-baseline justify-between border-t border-slate-100 pt-3">
                     <span className="font-semibold text-[#1F3A5F]">Total</span>
-                    <span className="font-serif text-3xl text-[#1F3A5F]">{formatMoney(quote.total_amount)}</span>
+                    <span className="font-serif text-3xl text-[#1F3A5F]">
+                      {formatMoney(Math.max(0, quote.total_amount - (promo?.discount_amount || 0)))}
+                    </span>
                   </div>
                 </div>
+              )}
+
+              {quote && (
+                <PromoCodeField
+                  scope="DELIVERY"
+                  subtotal={quote.subtotal}
+                  applied={promo}
+                  onApply={setPromo}
+                  onRemove={() => setPromo(null)}
+                />
               )}
 
               {quoteError && <p className="mt-4 text-sm text-red-600">{quoteError}</p>}

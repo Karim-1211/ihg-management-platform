@@ -190,6 +190,19 @@ def get_restaurant_service_charge_rate(db: Session, restaurant_id: uuid.UUID | N
     return resolve_rule(db, RuleLookup(rule_key="RESTAURANT_SERVICE_CHARGE_RATE", restaurant_id=restaurant_id)).value
 
 
+def get_delivery_preparation_minutes(db: Session, restaurant_id: uuid.UUID | None = None) -> int:
+    try:
+        return int(resolve_rule(db, RuleLookup(rule_key="DELIVERY_PREPARATION_MINUTES", restaurant_id=restaurant_id)).value)
+    except HTTPException:
+        return 25
+
+
+def get_delivery_travel_minutes(db: Session, restaurant_id: uuid.UUID | None = None) -> int:
+    try:
+        return int(resolve_rule(db, RuleLookup(rule_key="DELIVERY_TRAVEL_MINUTES", restaurant_id=restaurant_id)).value)
+    except HTTPException:
+        return 20
+
 # =========================================================
 # MANAGEMENT — locked in 18.6, unchanged
 # =========================================================

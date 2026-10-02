@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '../../services/api'
 import AppLayout from '../../components/layout/AppLayout'
+import PromoBand from '../../components/marketing/PromoBand'
 
 const CONTENT_MAX_W = 'max-w-[1280px]'
 
@@ -428,6 +429,8 @@ export default function HotelsPage() {
             <div className={`mx-auto ${CONTENT_MAX_W} rounded-2xl border border-red-200 bg-red-50 p-6 text-base text-red-700`}>{error}</div>
           </section>
         )}
+
+        <PromoBand kind="hotel" onCta={openHotel} />
 
         <section className="bg-white px-4 py-28 sm:px-6 lg:px-8">
           <div className={`mx-auto ${CONTENT_MAX_W}`}>

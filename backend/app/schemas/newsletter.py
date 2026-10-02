@@ -14,6 +14,11 @@ class NewsletterSubscribeRequest(BaseModel):
 class NewsletterSubscribeResponse(BaseModel):
     message: str
     already_subscribed: bool = False
+    # The welcome discount, returned so the form can show it immediately
+    # rather than making the guest wait for the email to arrive.
+    promo_code: str | None = None
+    promo_percent_off: float | None = None
+    promo_expires_at: datetime | None = None
 
 
 class NewsletterSubscriberResponse(BaseModel):

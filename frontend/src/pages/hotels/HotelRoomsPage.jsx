@@ -9,12 +9,23 @@ const NAVY = '#1F3A5F'
 const RED = '#FF2147'
 const ROOMS_PER_PAGE = 6
 const CONTENT_MAX_W = 'max-w-[1280px]'
-const PRICE_OPTIONS = [
-  { label: 'Any price', value: null },
-  { label: 'Up to $100', value: 100 },
-  { label: 'Up to $150', value: 150 },
-  { label: 'Up to $200', value: 200 },
-]
+// Price bands are built from the rooms that actually exist (see
+// buildPriceOptions): fixed thresholds like "up to $100 / $150 / $200"
+// produced options that all matched the same rooms, or none at all.
+function buildPriceOptions(roomTypes) {
+  const prices = [...new Set(roomTypes.map((rt) => Number(rt.base_price)).filter((n) => n > 0))].sort((a, b) => a - b)
+  if (prices.length < 2) return [{ label: 'Any price', value: null }]
+
+  const options = [{ label: 'Any price', value: null }]
+  // A band per distinct price, except the highest — "up to the most
+  // expensive room" is the same as "any price".
+  prices.slice(0, -1).forEach((price) => {
+    options.push({ label: `Up to $${price.toFixed(0)}`, value: price })
+  })
+  const top = prices[prices.length - 1]
+  options.push({ label: `$${top.toFixed(0)} and above`, value: -top })
+  return options
+}
 
 const PROPERTY_STORY = [
   {
@@ -199,7 +210,7 @@ function StickySearchBar({ visible, hotelName, checkIn, setCheckIn, checkOut, se
   )
 }
 
-function FilterBar({ viewTypes, filterView, setFilterView, filterMaxPrice, setFilterMaxPrice, filterBalconyOnly, setFilterBalconyOnly }) {
+function FilterBar({ viewTypes, priceOptions, filterView, setFilterView, filterMaxPrice, setFilterMaxPrice, filterBalconyOnly, setFilterBalconyOnly }) {
   return (
     <div className="mt-6 flex flex-wrap items-center gap-2">
       <button type="button" onClick={() => setFilterView('all')} className={`rounded-full px-4 py-2 text-xs font-bold transition ${filterView === 'all' ? 'bg-[#1F3A5F] text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'}`}>All views</button>
@@ -212,7 +223,7 @@ function FilterBar({ viewTypes, filterView, setFilterView, filterMaxPrice, setFi
         onChange={(e) => setFilterMaxPrice(e.target.value ? Number(e.target.value) : null)}
         className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 outline-none hover:bg-slate-50"
       >
-        {PRICE_OPTIONS.map((opt) => <option key={opt.label} value={opt.value ?? ''}>{opt.label}</option>)}
+        {priceOptions.map((opt) => <option key={opt.label} value={opt.value ?? ''}>{opt.label}</option>)}
       </select>
       <button type="button" onClick={() => setFilterBalconyOnly((v) => !v)} className={`rounded-full px-4 py-2 text-xs font-bold transition ${filterBalconyOnly ? 'bg-[#1F3A5F] text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'}`}>Balcony only</button>
     </div>
@@ -249,11 +260,26 @@ function RoomCard({ room, roomType, media, searched, available, scarcityCount, o
 
   return (
     <article className="flex h-full flex-col overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200/80">
-      <div className="relative h-[400px] shrink-0 bg-slate-200">
+      {/* The whole image opens the room, not just the small button — a guest
+          expects to tap a photograph to see more of it. */}
+      <button
+        type="button"
+        onClick={onGallery}
+        aria-label={`View details for room ${room.room_number}`}
+        className="group relative h-[400px] w-full shrink-0 cursor-pointer overflow-hidden bg-slate-200 text-left"
+      >
         <RoomCardImageCarousel images={media} alt={`${roomType?.name || 'Room'} ${room.room_number}`} />
         <span className={`absolute left-4 top-4 z-10 rounded-full ${statusClass} px-3 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-white`}>{status}</span>
-        <button type="button" onClick={onGallery} className="absolute bottom-3 right-3 z-10 rounded-lg bg-black/70 px-3 py-2 text-xs font-bold text-white backdrop-blur-sm hover:bg-black/85">View gallery · {media.length}</button>
-      </div>
+        <span className="pointer-events-none absolute inset-0 z-10 bg-gradient-to-t from-black/55 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+        <span className="pointer-events-none absolute inset-x-0 bottom-0 z-10 flex items-center justify-between px-4 pb-4">
+          <span className="translate-y-2 text-sm font-bold text-white opacity-0 transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
+            View room details
+          </span>
+          <span className="rounded-lg bg-black/70 px-3 py-2 text-xs font-bold text-white backdrop-blur-sm transition group-hover:bg-[#FF2147]">
+            {media.length} photo{media.length === 1 ? '' : 's'}
+          </span>
+        </span>
+      </button>
 
       <div className="flex flex-1 flex-col p-5">
         <div className="flex items-start justify-between gap-4">
@@ -350,6 +376,7 @@ export default function HotelRoomsPage() {
   // button on this page. That click is the browser interaction that permits
   // audio, so no separate "start voice" button is needed.
   const [aliceSignal, setAliceSignal] = useState(location.state?.startAlice ? 1 : 0)
+  const [silenceAlice, setSilenceAlice] = useState(0)
 
   useEffect(() => {
     let mounted = true
@@ -490,6 +517,15 @@ export default function HotelRoomsPage() {
     return uniqueMedia(roomTypeMedia[room.room_type_id] || [])
   }
 
+  // Opening a room doesn't change the route, so nothing else tells Alice to
+  // stop — without this she carries on asking about check-in dates while the
+  // guest is reading about the bathroom. The counter always increases, so
+  // every open silences her, not just the first.
+  function openRoomDetails(payload) {
+    setSilenceAlice((n) => n + 1)
+    setSelectedRoom(payload)
+  }
+
   function bookRoom(room) {
     const roomType = roomTypes.find((item) => item.id === room.room_type_id)
     const params = new URLSearchParams({
@@ -513,12 +549,18 @@ export default function HotelRoomsPage() {
     [roomTypes]
   )
 
+  const priceOptions = useMemo(() => buildPriceOptions(roomTypes), [roomTypes])
+
   const filteredRooms = useMemo(() => {
     return rooms.filter((room) => {
       const rt = roomTypes.find((item) => item.id === room.room_type_id)
       if (!rt) return true
       if (filterView !== 'all' && rt.view_type !== filterView) return false
-      if (filterMaxPrice && Number(rt.base_price) > filterMaxPrice) return false
+      if (filterMaxPrice) {
+        const price = Number(rt.base_price)
+        // A negative value means "this price and above" — see buildPriceOptions.
+        if (filterMaxPrice < 0 ? price < Math.abs(filterMaxPrice) : price > filterMaxPrice) return false
+      }
       if (filterBalconyOnly && !rt.has_balcony) return false
       return true
     })
@@ -575,6 +617,7 @@ export default function HotelRoomsPage() {
               defaultCheckOut={checkOut}
               defaultGuests={guests}
               startVoiceSignal={aliceSignal}
+              silenceSignal={silenceAlice}
             />
           </div>
         </section>
@@ -596,6 +639,7 @@ export default function HotelRoomsPage() {
             {viewTypes.length > 0 && (
               <FilterBar
                 viewTypes={viewTypes}
+                priceOptions={priceOptions}
                 filterView={filterView} setFilterView={setFilterView}
                 filterMaxPrice={filterMaxPrice} setFilterMaxPrice={setFilterMaxPrice}
                 filterBalconyOnly={filterBalconyOnly} setFilterBalconyOnly={setFilterBalconyOnly}
@@ -623,7 +667,7 @@ export default function HotelRoomsPage() {
                         searched={searched}
                         available={availableRoomIds.has(room.id)}
                         scarcityCount={availableCountByType[room.room_type_id]}
-                        onGallery={() => setSelectedRoom({ room, roomType, media })}
+                        onGallery={() => openRoomDetails({ room, roomType, media, available: availableRoomIds.has(room.id) })}
                         onBook={() => bookRoom(room)}
                       />
                     )
@@ -710,8 +754,15 @@ export default function HotelRoomsPage() {
 
         {selectedRoom && (
           <RoomGallery
-            roomName={`Room ${selectedRoom.room.room_number} · ${selectedRoom.roomType?.name || 'Room'}`}
+            roomName={`Room ${selectedRoom.room.room_number}`}
             images={selectedRoom.media}
+            room={selectedRoom.room}
+            roomType={selectedRoom.roomType}
+            hotel={hotel}
+            hotel={hotel}
+            nights={checkIn && checkOut ? Math.max(0, Math.round((new Date(checkOut) - new Date(checkIn)) / 86400000)) : 0}
+            availableCount={searched ? (availableCountByType[selectedRoom.room.room_type_id] || 0) : null}
+            onBook={selectedRoom.room.status === 'READY' ? () => { setSelectedRoom(null); bookRoom(selectedRoom.room) } : null}
             onClose={() => setSelectedRoom(null)}
           />
         )}

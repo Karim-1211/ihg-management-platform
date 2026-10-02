@@ -24,6 +24,7 @@ export default function SiteFooter() {
   const [consent, setConsent] = useState(false)
   const [status, setStatus] = useState('idle')
   const [message, setMessage] = useState('')
+  const [promoCode, setPromoCode] = useState(null)
 
   useEffect(() => {
     let cancelled = false
@@ -47,6 +48,7 @@ export default function SiteFooter() {
         source: 'footer',
       })
       setStatus('done')
+      setPromoCode(res.data?.promo_code || null)
       setMessage(res.data?.message || "Thank you — you're on the list.")
     } catch (err) {
       setStatus('error')
@@ -113,12 +115,17 @@ export default function SiteFooter() {
             </p>
 
             {status === 'done' ? (
-              <div className="mt-10 flex items-start gap-4 border-l-2 border-[#FF2147] bg-white/[0.04] px-6 py-6">
-                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"><Icon name="check" size={16} /></span>
-                <p className="text-[15px] leading-7 text-white/85">{message}</p>
-              </div>
+  <div className="mt-10 flex items-start gap-4 border-l-2 border-[#FF2147] bg-white/[0.04] px-6 py-6">
+    <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white"><Icon name="check" size={16} /></span>
+    <div className="min-w-0">
+      <p className="text-[15px] leading-7 text-white/85">{message}</p>
+      {promoCode && (
+        <p className="mt-3 font-mono text-xl font-bold tracking-[0.2em] text-[#FF2147]">{promoCode}</p>
+      )}
+    </div>
+  </div>
             ) : (
-              <form onSubmit={submit} className="mt-7">
+              <form id="subscribe" onSubmit={submit} className="mt-7">
                 <div className="grid gap-x-8 gap-y-2 sm:grid-cols-2">
                   <input value={firstName} onChange={(e) => setFirstName(e.target.value)} placeholder="First name" className={fieldClass} />
                   <input value={lastName} onChange={(e) => setLastName(e.target.value)} placeholder="Last name" className={fieldClass} />

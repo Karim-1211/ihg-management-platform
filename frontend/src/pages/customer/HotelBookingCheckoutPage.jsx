@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import AppLayout from '../../components/layout/AppLayout'
 import api from '../../services/api'
 import { useAuth } from '../../context/AuthContext'
+import PromoCodeField from '../../components/checkout/PromoCodeField'
 
 const PAYMENT_METHODS = [
   { value: 'PAYPAL', label: 'PayPal', note: 'Demo PayPal checkout' },
@@ -66,6 +67,12 @@ function InvoiceView({ result, room, roomType, guestName, guestEmail, guestPhone
             <td className="py-2">Tax</td>
             <td className="py-2 text-right">{money(tax)}</td>
           </tr>
+          {Number(result.discount_amount) > 0 && (
+            <tr className="border-b border-slate-100">
+              <td className="py-2 text-emerald-700">{result.promo_label || 'Subscriber discount'}</td>
+              <td className="py-2 text-right text-emerald-700">−{money(result.discount_amount)}</td>
+            </tr>
+          )}
         </tbody>
         <tfoot>
           <tr>
@@ -119,12 +126,14 @@ export default function HotelBookingCheckoutPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [bookingResult, setBookingResult] = useState(null)
+  const [promo, setPromo] = useState(null)
 
   const roomId = searchParams.get('roomId')
   const nights = useMemo(() => nightsBetween(checkIn, checkOut), [checkIn, checkOut])
   const subtotal = useMemo(() => Number(roomType?.base_price || 0) * nights, [roomType, nights])
   const tax = useMemo(() => subtotal * 0.05, [subtotal])
-  const total = subtotal + tax
+  const discount = promo ? Number(promo.discount_amount || 0) : 0
+  const total = Math.max(0, subtotal + tax - discount)
 
   useEffect(() => {
     if (!user) return
@@ -236,12 +245,19 @@ export default function HotelBookingCheckoutPage() {
         guest_phone: guestPhone.trim() || null,
         special_requests: specialRequests.trim() || null,
         payment_method: paymentMethod,
+        promo_code: promo?.code || null,
       })
 
       setBookingResult(response.data)
     } catch (err) {
-      setError(err.response?.data?.detail || 'Booking could not be completed. Please check the dates again.')
+      const detail = err.response?.data?.detail
+      const message = typeof detail === 'string' ? detail : 'Booking could not be completed. Please check the dates again.'
+      setError(message)
       setAvailabilityChecked(false)
+      // A rejected code is the likeliest cause of a failed booking once the
+      // dates are valid — clear it so the guest can correct or drop it.
+      if (/code/i.test(message)) setPromo(null)
+      window.scrollTo({ top: 0, behavior: 'smooth' })
     } finally {
       setSubmitting(false)
     }
@@ -390,8 +406,32 @@ export default function HotelBookingCheckoutPage() {
                 <div className="flex justify-between gap-4"><span className="text-white/65">Room rate</span><span>{money(roomType?.base_price)} / night</span></div>
                 <div className="flex justify-between gap-4"><span className="text-white/65">Subtotal</span><span>{money(subtotal)}</span></div>
                 <div className="flex justify-between gap-4"><span className="text-white/65">Tax</span><span>{money(tax)}</span></div>
+                {discount > 0 && (
+                  <div className="flex justify-between gap-4 font-semibold text-emerald-300">
+                    <span>{promo.label}</span><span>−{money(discount)}</span>
+                  </div>
+                )}
                 <div className="flex justify-between gap-4 border-t border-white/15 pt-4 text-lg font-bold"><span>Total</span><span>{money(total)}</span></div>
               </div>
+
+              <div className="mt-4 border-t border-white/15 pt-4">
+                {nights <= 0 ? (
+                  <p className="text-xs leading-5 text-white/40">
+                    Choose your dates to use a promotional code.
+                  </p>
+                ) : promo ? (
+                  <div className="flex items-center justify-between gap-3 rounded-xl bg-white/10 px-4 py-3">
+                    <div>
+                      <p className="text-sm font-bold text-white">{promo.code} applied</p>
+                      <p className="text-xs text-white/60">{promo.label}</p>
+                    </div>
+                    <button type="button" onClick={() => setPromo(null)} className="text-xs font-semibold text-white/70 underline hover:text-white">Remove</button>
+                  </div>
+                ) : (
+                  <PromoCodeField tone="dark" scope="HOTEL" subtotal={subtotal} applied={null} onApply={setPromo} onRemove={() => setPromo(null)} />
+                )}
+              </div>
+
               <button type="submit" disabled={submitting || !room || nights <= 0} className="mt-6 w-full rounded-xl bg-[#FF2147] py-3.5 text-sm font-bold text-white hover:bg-[#dc1539] disabled:cursor-not-allowed disabled:bg-white/20">{submitting ? 'Completing booking...' : `Pay & book · ${money(total)}`}</button>
               <p className="mt-3 text-center text-xs leading-5 text-white/55">The server re-checks the room, dates, occupancy, pricing and payment before confirming the booking.</p>
             </div>
