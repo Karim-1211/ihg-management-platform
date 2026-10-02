@@ -9,9 +9,10 @@ const NAVY = '#1F3A5F'
 const RED = '#FF2147'
 const ROOMS_PER_PAGE = 6
 const CONTENT_MAX_W = 'max-w-[1280px]'
-// Price bands are built from the rooms that actually exist (see
-// buildPriceOptions): fixed thresholds like "up to $100 / $150 / $200"
-// produced options that all matched the same rooms, or none at all.
+
+// Price bands are built from the room types that actually have rooms (see
+// typesInUse below). Building them from every type produced dead options —
+// "Up to $160" belonged to a suite type with no rooms left in it.
 function buildPriceOptions(roomTypes) {
   const prices = [...new Set(roomTypes.map((rt) => Number(rt.base_price)).filter((n) => n > 0))].sort((a, b) => a - b)
   if (prices.length < 2) return [{ label: 'Any price', value: null }]
@@ -25,6 +26,21 @@ function buildPriceOptions(roomTypes) {
   const top = prices[prices.length - 1]
   options.push({ label: `$${top.toFixed(0)} and above`, value: -top })
   return options
+}
+
+// One place that decides whether a room passes the filters, used both for
+// the list itself and for the counts shown on each option — so a count can
+// never disagree with what clicking the option actually shows.
+function roomMatches(rt, { view, maxPrice, balcony }) {
+  if (!rt) return true
+  if (view && view !== 'all' && rt.view_type !== view) return false
+  if (maxPrice) {
+    const price = Number(rt.base_price)
+    // A negative value means "this price and above" — see buildPriceOptions.
+    if (maxPrice < 0 ? price < Math.abs(maxPrice) : price > maxPrice) return false
+  }
+  if (balcony && !rt.has_balcony) return false
+  return true
 }
 
 const PROPERTY_STORY = [
@@ -210,22 +226,79 @@ function StickySearchBar({ visible, hotelName, checkIn, setCheckIn, checkOut, se
   )
 }
 
-function FilterBar({ viewTypes, priceOptions, filterView, setFilterView, filterMaxPrice, setFilterMaxPrice, filterBalconyOnly, setFilterBalconyOnly }) {
+// Every option shows how many rooms it would leave, given the other active
+// filters, and an option that would leave none is greyed out. Filters
+// combine, so without this a guest could stack two and land on an empty page
+// with no idea which one caused it.
+function FilterBar({
+  viewOptions, allViewsCount, priceOptions, balconyCount,
+  filterView, setFilterView, filterMaxPrice, setFilterMaxPrice,
+  filterBalconyOnly, setFilterBalconyOnly, anyActive, onClear,
+}) {
+  const chip = (active) => `rounded-full px-4 py-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-35 ${
+    active ? 'bg-[#1F3A5F] text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'
+  }`
+  const count = (active, n) => <span className={`ml-1.5 ${active ? 'text-white/60' : 'text-slate-400'}`}>{n}</span>
+
   return (
     <div className="mt-6 flex flex-wrap items-center gap-2">
-      <button type="button" onClick={() => setFilterView('all')} className={`rounded-full px-4 py-2 text-xs font-bold transition ${filterView === 'all' ? 'bg-[#1F3A5F] text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'}`}>All views</button>
-      {viewTypes.map((v) => (
-        <button key={v} type="button" onClick={() => setFilterView(v)} className={`rounded-full px-4 py-2 text-xs font-bold transition ${filterView === v ? 'bg-[#1F3A5F] text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'}`}>{v}</button>
-      ))}
+      <button type="button" onClick={() => setFilterView('all')} className={chip(filterView === 'all')}>
+        All views{count(filterView === 'all', allViewsCount)}
+      </button>
+      {viewOptions.map((v) => {
+        const active = filterView === v.value
+        return (
+          <button
+            key={v.value}
+            type="button"
+            disabled={v.count === 0 && !active}
+            onClick={() => setFilterView(v.value)}
+            className={chip(active)}
+          >
+            {v.value}{count(active, v.count)}
+          </button>
+        )
+      })}
+
       <span className="mx-1 hidden h-5 w-px bg-slate-200 sm:block" />
+
       <select
         value={filterMaxPrice ?? ''}
         onChange={(e) => setFilterMaxPrice(e.target.value ? Number(e.target.value) : null)}
-        className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 outline-none hover:bg-slate-50"
+        className={`rounded-full border px-4 py-2 text-xs font-bold outline-none ${
+          filterMaxPrice ? 'border-[#1F3A5F] bg-[#1F3A5F] text-white' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+        }`}
       >
-        {priceOptions.map((opt) => <option key={opt.label} value={opt.value ?? ''}>{opt.label}</option>)}
+        {priceOptions.map((opt) => (
+          <option
+            key={opt.label}
+            value={opt.value ?? ''}
+            disabled={opt.count === 0 && filterMaxPrice !== opt.value}
+            className="bg-white text-slate-700"
+          >
+            {opt.label} ({opt.count})
+          </option>
+        ))}
       </select>
-      <button type="button" onClick={() => setFilterBalconyOnly((v) => !v)} className={`rounded-full px-4 py-2 text-xs font-bold transition ${filterBalconyOnly ? 'bg-[#1F3A5F] text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50'}`}>Balcony only</button>
+
+      <button
+        type="button"
+        disabled={balconyCount === 0 && !filterBalconyOnly}
+        onClick={() => setFilterBalconyOnly((v) => !v)}
+        className={chip(filterBalconyOnly)}
+      >
+        Balcony only{count(filterBalconyOnly, balconyCount)}
+      </button>
+
+      {anyActive && (
+        <button
+          type="button"
+          onClick={onClear}
+          className="ml-1 rounded-full px-3 py-2 text-xs font-bold text-[#FF2147] underline-offset-4 hover:underline"
+        >
+          Clear filters
+        </button>
+      )}
     </div>
   )
 }
@@ -302,6 +375,7 @@ function RoomCard({ room, roomType, media, searched, available, scarcityCount, o
         <div className="mt-3 flex flex-wrap gap-2">
           {roomType?.bed_configuration && <span className="rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-600">{roomType.bed_configuration}</span>}
           {roomType?.view_type && <span className="rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-600">{roomType.view_type}</span>}
+          {roomType?.has_balcony && <span className="rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-600">Balcony</span>}
           <span className="rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-600">Up to {roomType?.max_occupancy || 0} guests</span>
         </div>
 
@@ -542,29 +616,70 @@ export default function HotelRoomsPage() {
     navigate(`/hotels/${hotelId}/booking/checkout?${params.toString()}`)
   }
 
+  function clearFilters() {
+    setFilterView('all')
+    setFilterMaxPrice(null)
+    setFilterBalconyOnly(false)
+  }
+
   const heroImages = useMemo(() => hotelMedia.map((item) => item.url).filter(Boolean), [hotelMedia])
 
-  const viewTypes = useMemo(
-    () => [...new Set(roomTypes.map((rt) => rt.view_type).filter(Boolean))],
+  const typeById = useMemo(
+    () => Object.fromEntries(roomTypes.map((rt) => [rt.id, rt])),
     [roomTypes]
   )
 
-  const priceOptions = useMemo(() => buildPriceOptions(roomTypes), [roomTypes])
+  // Only types that at least one room actually uses. A type with no rooms —
+  // like the retired Lake View Suite — produced a "Lake View" chip and a
+  // "$160" price band that could only ever return nothing.
+  const typesInUse = useMemo(
+    () => roomTypes.filter((rt) => rooms.some((room) => room.room_type_id === rt.id)),
+    [roomTypes, rooms]
+  )
+
+  const viewTypes = useMemo(
+    () => [...new Set(typesInUse.map((rt) => rt.view_type).filter(Boolean))],
+    [typesInUse]
+  )
+
+  const basePriceOptions = useMemo(() => buildPriceOptions(typesInUse), [typesInUse])
+
+  // How many rooms remain if one filter is changed and the others stay as
+  // they are — the number shown beside each option.
+  const filterCounts = useMemo(() => {
+    const current = { view: filterView, maxPrice: filterMaxPrice, balcony: filterBalconyOnly }
+    const countWith = (overrides) =>
+      rooms.filter((room) => roomMatches(typeById[room.room_type_id], { ...current, ...overrides })).length
+
+    return {
+      allViews: countWith({ view: 'all' }),
+      views: viewTypes.map((v) => ({ value: v, count: countWith({ view: v }) })),
+      prices: basePriceOptions.map((opt) => ({ ...opt, count: countWith({ maxPrice: opt.value }) })),
+      balcony: countWith({ balcony: true }),
+    }
+  }, [rooms, typeById, viewTypes, basePriceOptions, filterView, filterMaxPrice, filterBalconyOnly])
+
+  const anyFilterActive = filterView !== 'all' || filterMaxPrice != null || filterBalconyOnly
 
   const filteredRooms = useMemo(() => {
-    return rooms.filter((room) => {
-      const rt = roomTypes.find((item) => item.id === room.room_type_id)
-      if (!rt) return true
-      if (filterView !== 'all' && rt.view_type !== filterView) return false
-      if (filterMaxPrice) {
-        const price = Number(rt.base_price)
-        // A negative value means "this price and above" — see buildPriceOptions.
-        if (filterMaxPrice < 0 ? price < Math.abs(filterMaxPrice) : price > filterMaxPrice) return false
-      }
-      if (filterBalconyOnly && !rt.has_balcony) return false
-      return true
+    const matching = rooms.filter((room) =>
+      roomMatches(typeById[room.room_type_id], {
+        view: filterView,
+        maxPrice: filterMaxPrice,
+        balcony: filterBalconyOnly,
+      })
+    )
+
+    // The API returns rooms in insertion order, which is why 103 appeared
+    // beside 302. A guest reads a floor plan numerically, so sort by number —
+    // numerically where possible, so 1010 would never sort before 202.
+    return [...matching].sort((a, b) => {
+      const na = parseInt(String(a.room_number).replace(/\D/g, ''), 10)
+      const nb = parseInt(String(b.room_number).replace(/\D/g, ''), 10)
+      if (!Number.isNaN(na) && !Number.isNaN(nb) && na !== nb) return na - nb
+      return String(a.room_number).localeCompare(String(b.room_number), undefined, { numeric: true })
     })
-  }, [rooms, roomTypes, filterView, filterMaxPrice, filterBalconyOnly])
+  }, [rooms, typeById, filterView, filterMaxPrice, filterBalconyOnly])
 
   const availableCountByType = useMemo(() => {
     if (!searched) return {}
@@ -638,11 +753,15 @@ export default function HotelRoomsPage() {
 
             {viewTypes.length > 0 && (
               <FilterBar
-                viewTypes={viewTypes}
-                priceOptions={priceOptions}
+                viewOptions={filterCounts.views}
+                allViewsCount={filterCounts.allViews}
+                priceOptions={filterCounts.prices}
+                balconyCount={filterCounts.balcony}
                 filterView={filterView} setFilterView={setFilterView}
                 filterMaxPrice={filterMaxPrice} setFilterMaxPrice={setFilterMaxPrice}
                 filterBalconyOnly={filterBalconyOnly} setFilterBalconyOnly={setFilterBalconyOnly}
+                anyActive={anyFilterActive}
+                onClear={clearFilters}
               />
             )}
 
@@ -656,7 +775,7 @@ export default function HotelRoomsPage() {
               <>
                 <div className="mt-10 grid gap-7 md:grid-cols-2 lg:grid-cols-3">
                   {pagedRooms.map((room) => {
-                    const roomType = roomTypes.find((item) => item.id === room.room_type_id)
+                    const roomType = typeById[room.room_type_id]
                     const media = galleryFor(room)
                     return (
                       <RoomCard
@@ -676,7 +795,14 @@ export default function HotelRoomsPage() {
 
                 {!filteredRooms.length && !error && (
                   <div className="mt-10 rounded-2xl border border-slate-200 bg-white px-6 py-16 text-center text-base text-slate-500">
-                    {rooms.length ? 'No rooms match these filters — try clearing one.' : 'No rooms are configured for this hotel yet.'}
+                    {rooms.length ? (
+                      <>
+                        No rooms match these filters together.{' '}
+                        <button type="button" onClick={clearFilters} className="font-bold text-[#FF2147] underline-offset-4 hover:underline">
+                          Clear filters
+                        </button>
+                      </>
+                    ) : 'No rooms are configured for this hotel yet.'}
                   </div>
                 )}
 
@@ -758,7 +884,6 @@ export default function HotelRoomsPage() {
             images={selectedRoom.media}
             room={selectedRoom.room}
             roomType={selectedRoom.roomType}
-            hotel={hotel}
             hotel={hotel}
             nights={checkIn && checkOut ? Math.max(0, Math.round((new Date(checkOut) - new Date(checkIn)) / 86400000)) : 0}
             availableCount={searched ? (availableCountByType[selectedRoom.room.room_type_id] || 0) : null}

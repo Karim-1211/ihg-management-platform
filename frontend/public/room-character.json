@@ -1,0 +1,38 @@
+{
+  "101": {
+    "headline": "Ground floor, opening to the garden.",
+    "note": "The quietest of the standard rooms — no corridor traffic past the door, and the garden terrace a few steps away."
+  },
+  "102": {
+    "headline": "A corner room, with light on two sides.",
+    "note": "Tall windows and a small balcony at the end of the first-floor corridor, with morning sun from the east."
+  },
+  "103": {
+    "headline": "The city, framed and double-glazed.",
+    "note": "Faces Gulshan Avenue, with glazing thick enough that the view is the only thing that reaches you. The guest lounge on this floor shares the same outlook."
+  },
+  "201": {
+    "headline": "The corner suite, with the city at your window.",
+    "note": "A full corner of the second floor, with windows on two aspects and a balcony looking out across the rooftops."
+  },
+  "202": {
+    "headline": "Open water, from the moment you wake.",
+    "note": "The bed faces the sea, and the balcony is deep enough to sit out on properly — coffee at sunrise is the point of this room."
+  },
+  "301": {
+    "headline": "Quiet at the end of the corridor, facing the lake.",
+    "note": "The farthest suite from the lift, with the garden below, the lake beyond it and the mountains behind — and nothing to hear at all."
+  },
+  "302": {
+    "headline": "Wake to the water, on the quiet side.",
+    "note": "Set away from the avenue entirely. At dusk the lake goes gold and the city disappears behind you."
+  },
+  "401": {
+    "headline": "The longest view in the house.",
+    "note": "Top floor, facing the water with the ridgeline behind it — the balcony is deep enough to eat breakfast on."
+  },
+  "402": {
+    "headline": "High, quiet, and facing the ridgeline.",
+    "note": "A window seat positioned for the morning, when the light comes up behind the mountains."
+  }
+}

@@ -14,12 +14,16 @@ const GROUPS = [
 
 // One line per room type, written to give a guest a reason to want the room
 // rather than simply naming it again.
+// Keyed to the room-type names that actually exist in the database. A
+// missing key silently fell through to the default, which is how a Mountain
+// View Suite ended up with a generic headline and a City View spec.
 const ROOM_HEADLINES = {
   'Deluxe Suite': 'The corner suite, with the city at your window.',
-  'Standard Room': 'Everything you need, and nothing you won\'t use.',
-  'Lake View Room': 'Wake to the water, on the quiet side of the building.',
-  'Sea View Room': 'A room built around the view, and a balcony worth sitting on.',
-  'Mountain View Room': 'High, quiet, and facing the ridgeline.',
+  'Standard Room': "Everything you need, and nothing you won't use.",
+  'City View Room': 'The city, framed and double-glazed.',
+  'Mountain View Suite': 'High, quiet, and facing the ridgeline.',
+  'Ocean View Suite': 'A suite built around the water.',
+  'Lake View Suite': 'Wake to the water, on the quiet side of the building.',
   _default: 'A quiet room, considered down to the details.',
 }
 
@@ -89,6 +93,19 @@ export default function RoomGallery({
   const [index, setIndex] = useState(0)
   const [lightbox, setLightbox] = useState(false)
   const [resolvedHotel, setResolvedHotel] = useState(hotel)
+  const [character, setCharacter] = useState(null)
+
+  // Per-room character: three Deluxe Suites share a description, which is
+  // right for a category but makes individual rooms indistinguishable.
+  useEffect(() => {
+    if (!room?.room_number) return undefined
+    let cancelled = false
+    fetch('/room-character.json')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => { if (!cancelled && data) setCharacter(data[room.room_number] || null) })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [room])
 
   // The hotel's facilities are part of what a guest is buying, so the room
   // page fetches them if the caller didn't pass them in.
@@ -233,8 +250,11 @@ export default function RoomGallery({
                   {roomType?.name || 'The room'}
                 </p>
                 <h3 className="mt-2.5 font-serif text-3xl leading-tight text-[#1F3A5F]">
-                  {ROOM_HEADLINES[roomType?.name] || ROOM_HEADLINES._default}
+                  {character?.headline || ROOM_HEADLINES[roomType?.name] || ROOM_HEADLINES._default}
                 </h3>
+                {character?.note && (
+                  <p className="mt-3 text-[15px] italic leading-7 text-slate-500">{character.note}</p>
+                )}
                 <div className="mt-4 flex items-center gap-3">
                   <span className="h-px w-12 bg-[#FF2147]" />
                   <span className="h-1 w-1 rotate-45 bg-[#FF2147]" />

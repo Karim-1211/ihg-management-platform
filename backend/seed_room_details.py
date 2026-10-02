@@ -66,112 +66,113 @@ PROFILES = {
             "given isn't quite right. The marble bathroom has a soaking tub beneath a window and a "
             "separate rainfall shower. Evenings bring turndown service and, if you'd like it, a "
             "nightcap sent up from the bar.\n\n"
-            "Breakfast is included, as is full use of the pool, spa and fitness studio. A stay here "
-            "is meant to feel unhurried."
+            "Breakfast is included, as is full use of the pool, spa and fitness studio."
         ),
         "view_type": "City View",
         "bed_configuration": "1 King Bed",
         "has_balcony": True,
         "has_bathtub": True,
         "extra_amenities": [
-            "Separate lounge and seating area",
-            "Private furnished balcony",
-            "Marble bathroom with soaking tub",
-            "Separate rainfall shower",
-            "Nespresso machine & complimentary pods",
-            "Complimentary minibar, restocked daily",
-            "Egyptian cotton bathrobes & slippers",
-            "Evening turndown service",
-            "Pillow menu",
-            "Executive work desk",
-            "Bulgari bath amenities",
-            "Complimentary daily newspaper",
-            "Welcome fruit & still water",
+            "Separate lounge and seating area", "Private furnished balcony",
+            "Marble bathroom with soaking tub", "Separate rainfall shower",
+            "Nespresso machine & complimentary pods", "Complimentary minibar, restocked daily",
+            "Egyptian cotton bathrobes & slippers", "Evening turndown service",
+            "Pillow menu", "Executive work desk", "Premium bath amenities",
+            "Complimentary daily newspaper", "Welcome fruit & still water",
         ],
     },
     "Standard Room": {
         "description": (
             "An unfussy, well-proportioned room that gets the essentials right, and gets out of the "
             "way. A firm bed, curtains that actually black out, and a desk you can genuinely work at.\n\n"
-            "The bathroom is compact but properly finished, with a walk-in rainfall shower and full-size "
-            "toiletries. Everything you need for a short stay, nothing you'll never use.\n\n"
-            "Breakfast and full use of the pool, spa and fitness studio are included, exactly as they "
-            "are for every room in the house."
+            "The bathroom is compact but properly finished, with a walk-in rainfall shower and "
+            "full-size toiletries. Everything you need for a short stay, nothing you'll never use.\n\n"
+            "Breakfast and full use of the pool, spa and fitness studio are included, exactly as "
+            "they are for every room in the house."
         ),
         "view_type": "Garden View",
         "bed_configuration": "1 Queen Bed",
         "has_balcony": False,
         "has_bathtub": False,
         "extra_amenities": [
-            "Walk-in rainfall shower",
-            "Work desk & ergonomic chair",
-            "Full wardrobe with luggage rack",
-            "Full-size bath amenities",
+            "Walk-in rainfall shower", "Work desk & ergonomic chair",
+            "Full wardrobe with luggage rack", "Full-size bath amenities",
             "Bottled still water, replenished daily",
         ],
     },
-    "Lake View Room": {
+    "City View Room": {
         "description": (
-            "Set on the quiet side of the building, with a private balcony looking out over the water. "
-            "Best at dusk, when the light turns gold and the city noise drops away entirely.\n\n"
-            "Inside, warm materials and a bed positioned to face the window. The bathroom has a deep "
-            "soaking tub and a separate shower, with robes and slippers waiting.\n\n"
-            "Breakfast, the rooftop pool, the spa and the fitness studio are all included."
-        ),
-        "view_type": "Lake View",
-        "bed_configuration": "1 King Bed",
-        "has_balcony": True,
-        "has_bathtub": True,
-        "extra_amenities": [
-            "Private balcony with lounge seating",
-            "Deep soaking tub",
-            "Separate rainfall shower",
-            "Nespresso machine",
-            "Bathrobes & slippers",
-            "Work desk",
-            "Premium bath amenities",
-        ],
-    },
-    "Sea View Room": {
-        "description": (
-            "Wide water views from a room built around them. The bed faces the window, and the balcony "
-            "is deep enough to sit out on properly rather than just stand.\n\n"
-            "Mornings here are the point: coffee on the balcony, the water changing colour as the sun "
-            "comes up. The bathroom has a soaking tub and a separate shower.\n\n"
-            "Breakfast, the rooftop pool, the spa and the fitness studio are included with every night."
-        ),
-        "view_type": "Sea View",
-        "bed_configuration": "1 King Bed",
-        "has_balcony": True,
-        "has_bathtub": True,
-        "extra_amenities": [
-            "Deep private balcony with seating",
-            "Soaking tub with a view",
-            "Separate rainfall shower",
-            "Nespresso machine",
-            "Bathrobes & slippers",
-            "Premium bath amenities",
-        ],
-    },
-    "Mountain View Room": {
-        "description": (
-            "Quiet, high, and facing the ridgeline. Warm materials, a generous bed, and a window seat "
-            "that makes a convincing argument for staying in.\n\n"
-            "The balcony catches the morning sun. The bathroom is finished in stone, with a walk-in "
-            "rainfall shower and full-size amenities.\n\n"
+            "A room that puts the city where you can see it: tall windows, a bed angled toward the "
+            "glass, and enough quiet behind the double glazing to forget the traffic is there.\n\n"
+            "Best after dark, when Gulshan lights up and the room goes warm and low. The bathroom "
+            "is finished in stone with a walk-in rainfall shower.\n\n"
             "Breakfast, the rooftop pool, the spa and the fitness studio are included."
+        ),
+        "view_type": "City View",
+        "bed_configuration": "1 Queen Bed",
+        "has_balcony": False,
+        "has_bathtub": False,
+        "extra_amenities": [
+            "Floor-to-ceiling city windows", "Double-glazed for quiet",
+            "Walk-in rainfall shower", "Work desk", "Full-size bath amenities",
+        ],
+    },
+    "Mountain View Suite": {
+        "description": (
+            "High, quiet, and facing the ridgeline. The suite is built around the outlook — a window "
+            "seat deep enough to spend a morning in, and a bed positioned so the first thing you see "
+            "is the horizon.\n\n"
+            "Warm materials throughout, a separate sitting area, and a private balcony that catches "
+            "the early sun. The bathroom is finished in stone, with a walk-in rainfall shower and "
+            "full-size amenities.\n\n"
+            "Breakfast, the rooftop pool, the spa and the fitness studio are included with every night."
         ),
         "view_type": "Mountain View",
         "bed_configuration": "1 King Bed",
         "has_balcony": True,
         "has_bathtub": False,
         "extra_amenities": [
-            "Private balcony",
-            "Window seat",
-            "Walk-in rainfall shower",
-            "Nespresso machine",
-            "Bathrobes & slippers",
-            "Work desk",
+            "Private balcony facing the ridgeline", "Window seat",
+            "Separate sitting area", "Walk-in rainfall shower",
+            "Nespresso machine", "Bathrobes & slippers", "Work desk",
+        ],
+    },
+    "Ocean View Suite": {
+        "description": (
+            "Wide water views from a suite designed around them. The bed faces the window, and the "
+            "balcony is deep enough to sit out on properly rather than just stand.\n\n"
+            "Mornings here are the point: coffee on the balcony, the water changing colour as the "
+            "sun comes up. Inside, a separate sitting area and a bathroom with a soaking tub and a "
+            "separate shower.\n\n"
+            "Breakfast, the rooftop pool, the spa and the fitness studio are included."
+        ),
+        "view_type": "Ocean View",
+        "bed_configuration": "1 King Bed",
+        "has_balcony": True,
+        "has_bathtub": True,
+        "extra_amenities": [
+            "Deep private balcony with seating", "Separate sitting area",
+            "Soaking tub with a view", "Separate rainfall shower",
+            "Nespresso machine", "Bathrobes & slippers", "Premium bath amenities",
+        ],
+    },
+    "Lake View Suite": {
+        "description": (
+            "Set on the quiet side of the building, with a private balcony looking out over the "
+            "water. Best at dusk, when the light turns gold and the city noise drops away entirely.\n\n"
+            "Inside, warm materials and a bed positioned to face the window, with a separate sitting "
+            "area for the hours you don't want to spend in it. The bathroom has a deep soaking tub "
+            "and a separate shower, with robes and slippers waiting.\n\n"
+            "Breakfast, the rooftop pool, the spa and the fitness studio are included."
+        ),
+        "view_type": "Lake View",
+        "bed_configuration": "1 King Bed",
+        "has_balcony": True,
+        "has_bathtub": True,
+        "extra_amenities": [
+            "Private balcony over the water", "Separate sitting area",
+            "Deep soaking tub", "Separate rainfall shower",
+            "Nespresso machine", "Bathrobes & slippers", "Work desk",
         ],
     },
 }
