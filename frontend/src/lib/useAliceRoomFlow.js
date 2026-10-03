@@ -20,6 +20,41 @@ export const ALICE_ROOM_LINES = {
   retryGuests: { file: '/audio/alice-retry-guests.wav', text: "I didn't catch that — how many guests will be staying?" },
 }
 
+// Replies to everything that ISN'T a room wish. These have no pre-recorded
+// clip, so they are narrated live (or by the browser voice when signed out).
+const SMALL_TALK_LINES = {
+  greeting: "Hello, and welcome! It's lovely to meet you. What kind of room are you hoping for — a view of the mountains or the water, a balcony, a quiet floor?",
+  howAreYou: "I'm very well, thank you for asking — and I hope your day is going beautifully. Now, what kind of room can I find for you?",
+  help: "I can find the right room for you and check live availability. Just tell me what matters most — the view, a balcony, the bed, a quiet floor — and I'll take it from there.",
+  thanks: "My pleasure. Whenever you're ready, tell me what you'd like in a room — a view, a balcony, anything at all.",
+  moveOn: "No problem at all — I'll show you everything that's free. What date would you like to check in?",
+  signInToSearch: "To check live availability for your dates, I'll just need you to sign in — it only takes a moment, and I'll bring you straight back here.",
+}
+
+// Words that mean the guest is describing a room, a stay or a party.
+// Deliberately broad: a real wish wrongly treated as small talk is more
+// annoying than small talk that slips through.
+const ROOM_WORDS = /\b(rooms?|suites?|views?|mountains?|lakes?|ocean|sea|beach|water|city|skyline|garden|balcony|terrace|quiet|calm|peaceful|bed|beds|king|queen|twin|double|single|bath|bathtub|tub|shower|floor|high|top|ground|family|kids|children|child|baby|couple|honeymoon|anniversary|birthday|romantic|business|work|desk|spacious|large|big|small|cozy|cosy|luxury|luxurious|cheap|budget|affordable|price|cost|deluxe|standard|premium|window|sunrise|sunset|guests?|people|persons|adults?|nights?|stay|staying|accessible|wheelchair|pool|spa|breakfast|smoking|pet|pets)\b/
+const PARTY_SIZE = /\b(\d+|one|two|three|four|five|six)\b.*\b(of us|people|persons|guests?|adults?)\b/
+const HOW_ARE_YOU = /\bhow (are|r) (you|u|things)\b|\bhow'?s it going\b|\bhow do you do\b|\bhow have you been\b/
+const GREETING = /^(hi+|hello+|hey+|hiya|howdy|yo|greetings|good (morning|afternoon|evening|day)|salam|assalamu?|as-salamu|hola|bonjour|namaste)\b/
+const HELP = /\b(help|what can you do|who are you|what are you|how does (this|it) work)\b/
+const THANKS = /^(thanks|thank you|thx|cheers|ok|okay|cool|great|nice|fine|good|alright|perfect|sure)\b/
+
+// What kind of message the guest sent at the "what are you looking for"
+// step. A room wish wins over everything else, so "hi, I'd like a sea
+// view" moves straight on rather than getting a hello back.
+function classifyPreference(text) {
+  const t = text.toLowerCase().replace(/[^\p{L}\p{N}\s'$-]/gu, ' ').replace(/\s+/g, ' ').trim()
+  if (!t) return 'unclear'
+  if (ROOM_WORDS.test(t) || PARTY_SIZE.test(t)) return 'room'
+  if (HOW_ARE_YOU.test(t)) return 'howAreYou'
+  if (GREETING.test(t)) return 'greeting'
+  if (HELP.test(t)) return 'help'
+  if (THANKS.test(t)) return 'thanks'
+  return 'unclear'
+}
+
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']
 const NUMBER_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 }
 
@@ -74,10 +109,6 @@ function parseSpokenGuests(text) {
   return null
 }
 
-function looksLikeRealPreference(text) {
-  return text.trim().split(/\s+/).filter(Boolean).length >= 2
-}
-
 function matchRoomFromText(text, rooms) {
   const normalized = text.trim().toLowerCase()
   if (!normalized || !rooms.length) return null
@@ -104,6 +135,8 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
   const replyTextRef = useRef('')
   const hasStartedRef = useRef(false)
   const stepRef = useRef('preference')
+  const unclearCountRef = useRef(0)
+  const lastMicErrorRef = useRef('')
 
   const [voiceEnabled, setVoiceEnabled] = useState(true)
   const [step, setStep] = useState('preference')
@@ -125,6 +158,16 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
 
   useEffect(() => { stepRef.current = step }, [step])
   useEffect(() => () => { activeAudioRef.current?.pause(); window.speechSynthesis?.cancel(); mic.stop() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When the microphone gives up, Alice says so in the conversation, so
+  // the guest knows to type rather than waiting on a mic that can't hear.
+  // Shown, not spoken: speaking it would reopen the very mic that failed.
+  useEffect(() => {
+    if (!mic.error) { lastMicErrorRef.current = ''; return }
+    if (mic.error === lastMicErrorRef.current) return
+    lastMicErrorRef.current = mic.error
+    setLog((l) => [...l, { from: 'alice', text: mic.error }])
+  }, [mic.error])
 
   // Greeting TEXT appears immediately, but voice waits for the guest's
   // first click. Browsers block audio that hasn't followed a user
@@ -171,12 +214,54 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
     speakThenListen(line.file, line.text, activeAudioRef, voiceEnabled, () => mic.start())
   }
 
-  function submitPreferenceValue(value) {
-    const text = (value ?? preference).trim()
+  // A reply with no pre-recorded clip: narrated live, then listening again.
+  function sayLine(text, userText) {
+    mic.stop()
+    setLog((l) => [...l, ...(userText ? [{ from: 'user', text: userText }] : []), { from: 'alice', text }])
+    narrateThenListen(text, activeAudioRef, voiceEnabled, () => mic.start())
+  }
+
+  // The single entry point for the first step, typed or spoken. Previously
+  // a typed answer skipped every check, so "hi" became the guest's room
+  // preference and Alice moved straight on to dates.
+  function handlePreference(raw) {
+    const text = (raw ?? preference).trim()
     if (!text) return
-    setPreference(text)
-    setLog((l) => [...l, { from: 'user', text }])
-    goTo('checkin', 'askCheckin')
+
+    const kind = classifyPreference(text)
+
+    if (kind === 'room') {
+      unclearCountRef.current = 0
+      setPreference(text)
+      setLog((l) => [...l, { from: 'user', text }])
+      goTo('checkin', 'askCheckin')
+      return
+    }
+
+    // Anything else keeps the guest on this step, with the box cleared.
+    setPreference('')
+
+    if (kind === 'unclear') {
+      unclearCountRef.current += 1
+      // Twice in a row: don't trap the guest in a loop. Show them
+      // everything that's free instead.
+      if (unclearCountRef.current >= 2) {
+        unclearCountRef.current = 0
+        setPreference('any available room')
+        setStep('checkin')
+        sayLine(SMALL_TALK_LINES.moveOn, text)
+        return
+      }
+      retry('retryPreference', text)
+      return
+    }
+
+    unclearCountRef.current = 0
+    sayLine(SMALL_TALK_LINES[kind], text)
+  }
+
+  function submitPreferenceValue(value) {
+    handlePreference(value)
   }
 
   function submitCheckInValue(value) {
@@ -200,6 +285,20 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
   async function submitGuestsValue(value) {
     const v = value ?? guests
     setGuests(v)
+
+    // The live search needs an account. Previously a signed-out guest hit a
+    // refused request that reloaded the whole site onto the login page,
+    // losing the page and everything they'd told Alice. Now she explains,
+    // then sends them to sign in properly and back to this page.
+    if (!user) {
+      mic.stop()
+      setLog((l) => [...l, { from: 'user', text: `${v} guest${v === 1 ? '' : 's'}` }, { from: 'alice', text: SMALL_TALK_LINES.signInToSearch }])
+      narrateThenListen(SMALL_TALK_LINES.signInToSearch, activeAudioRef, voiceEnabled, () => {
+        requireAuth(user, navigate, location, { reason: 'Please sign in so Alice can check live availability for your dates.' })
+      })
+      return
+    }
+
     setLog((l) => [...l, { from: 'user', text: `${v} guest${v === 1 ? '' : 's'}` }, { from: 'alice', text: ALICE_ROOM_LINES.checking.text }])
     mic.stop()
     setStep('searching')
@@ -220,8 +319,7 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
     if (!transcript) return
     switch (stepRef.current) {
       case 'preference':
-        if (!looksLikeRealPreference(transcript)) { retry('retryPreference', transcript); break }
-        submitPreferenceValue(transcript)
+        handlePreference(transcript)
         break
       case 'checkin': {
         const parsed = parseSpokenDate(transcript)
@@ -356,6 +454,7 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
     activeAudioRef.current?.pause()
     window.speechSynthesis?.cancel()
     mic.stop()
+    unclearCountRef.current = 0
     setStep('preference')
     setPreference('')
     setPrimaryRooms([])

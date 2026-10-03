@@ -97,6 +97,13 @@ function playClip(audio, text, isCurrent, onReady, label) {
   })
 }
 
+async function speakWithBrowserVoice(text, isCurrent, onReady) {
+  const finishedNaturally = await speakBrowserFallback(text)
+  if (finishedNaturally && isCurrent()) {
+    window.setTimeout(() => { if (isCurrent()) onReady() }, POST_SPEECH_BUFFER_MS)
+  }
+}
+
 export function speakThenListen(file, text, audioRef, voiceEnabled, onReady) {
   if (!voiceEnabled) { onReady(); return }
   audioRef.current?.pause()
@@ -114,6 +121,16 @@ export async function narrateThenListen(text, audioRef, voiceEnabled, onReady) {
   // Claimed BEFORE the network wait, so a newer line spoken while this one
   // is still being generated makes this one stand down instead of playing.
   const isCurrent = claim(audioRef)
+
+  // The narration endpoint is for signed-in guests only. A signed-out
+  // visitor gets the browser's voice directly: calling the server would
+  // only be refused — and a refusal sent them to the login page mid-sentence.
+  // It also keeps hosted voice credits for guests with an account.
+  if (!localStorage.getItem('ihg_token')) {
+    await speakWithBrowserVoice(text, isCurrent, onReady)
+    return
+  }
+
   try {
     const response = await api.post('/ai/room-narration', { text: text.slice(0, 1500) }, { responseType: 'blob' })
     if (!isCurrent()) return
@@ -123,27 +140,53 @@ export async function narrateThenListen(text, audioRef, voiceEnabled, onReady) {
     audio.addEventListener('ended', () => URL.revokeObjectURL(url))
     playClip(audio, text, isCurrent, onReady, 'live narration')
   } catch {
+    // Includes a 503 from the server: no hosted voice answered.
     if (!isCurrent()) return
-    const finishedNaturally = await speakBrowserFallback(text)
-    if (finishedNaturally && isCurrent()) {
-      window.setTimeout(() => { if (isCurrent()) onReady() }, POST_SPEECH_BUFFER_MS)
-    }
+    await speakWithBrowserVoice(text, isCurrent, onReady)
   }
 }
+
+// What each recognition failure means, in words a guest understands.
+const MIC_ERROR_MESSAGES = {
+  'not-allowed': "I can't use your microphone — please allow microphone access for this site, or type your answer below.",
+  'service-not-allowed': "Voice input is blocked in this browser — please type your answer below.",
+  'audio-capture': "I can't find a microphone on this device — please type your answer below.",
+  'network': "I can't reach the speech service right now, so I can't hear you — please type your answer below.",
+  'language-not-supported': "Voice input isn't available in this browser — please type your answer below.",
+  'unsupported': "Voice input isn't supported in this browser — please type your answer below.",
+}
+// Errors that will not fix themselves by retrying.
+const FATAL_MIC_ERRORS = new Set(['not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'])
+const MAX_CONSECUTIVE_MIC_FAILURES = 3
 
 // One shared recognition instance. Keeps itself listening across the
 // browser's own silence timeout, and discards anything reported "final"
 // within 400ms of starting (leftover echo of Alice's own voice).
+//
+// `listening` stays true for as long as listening is WANTED, including the
+// brief restarts between attempts — so the indicator holds steady instead
+// of blinking. Real failures are counted: after a few in a row (or one that
+// can't fix itself) it stops and reports `error`, rather than retrying
+// forever behind a "Listening…" that never hears anything.
 export function useAutoMic(onFinalResult) {
   const [listening, setListening] = useState(false)
   const [interimText, setInterimText] = useState('')
+  const [error, setError] = useState('')
   const supported = typeof window !== 'undefined' && !!(window.SpeechRecognition || window.webkitSpeechRecognition)
   const recognitionRef = useRef(null)
   const callbackRef = useRef(onFinalResult)
   const keepAliveRef = useRef(false)
   const gotResultRef = useRef(false)
   const restartScheduledRef = useRef(false)
+  const failuresRef = useRef(0)
   useEffect(() => { callbackRef.current = onFinalResult })
+
+  function giveUp(code) {
+    keepAliveRef.current = false
+    setListening(false)
+    setInterimText('')
+    setError(MIC_ERROR_MESSAGES[code] || "I'm having trouble hearing you right now — please type your answer below.")
+  }
 
   function scheduleRestart() {
     if (restartScheduledRef.current) return
@@ -172,6 +215,7 @@ export function useAutoMic(onFinalResult) {
       if (last.isFinal) {
         if (Date.now() - startedAt < 400) return
         gotResultRef.current = true
+        failuresRef.current = 0
         setInterimText('')
         console.log('[Alice] heard:', JSON.stringify(transcript))
         callbackRef.current(transcript.trim())
@@ -179,18 +223,43 @@ export function useAutoMic(onFinalResult) {
         setInterimText(transcript)
       }
     }
+
     recognition.onend = () => {
       recognitionRef.current = null
-      setListening(false)
       setInterimText('')
-      if (keepAliveRef.current && !gotResultRef.current) scheduleRestart()
+      // Still wanted and nothing heard yet: restart quietly, keeping the
+      // indicator steady.
+      if (keepAliveRef.current && !gotResultRef.current) {
+        scheduleRestart()
+        return
+      }
+      setListening(false)
     }
+
     recognition.onerror = (e) => {
       recognitionRef.current = null
-      setListening(false)
       setInterimText('')
-      if (keepAliveRef.current && e.error !== 'aborted' && e.error !== 'not-allowed') scheduleRestart()
+      const code = e?.error || 'unknown'
+
+      // Silence is normal: the browser stops after a few quiet seconds,
+      // and onend restarts it.
+      if (code === 'no-speech') return
+
+      // Stopped on purpose, or taken over by another listener.
+      if (code === 'aborted') {
+        keepAliveRef.current = false
+        setListening(false)
+        return
+      }
+
+      console.warn('[Alice] microphone error:', code)
+      failuresRef.current += 1
+      if (FATAL_MIC_ERRORS.has(code) || failuresRef.current >= MAX_CONSECUTIVE_MIC_FAILURES) {
+        giveUp(code)
+      }
+      // Otherwise onend fires next and retries.
     }
+
     recognitionRef.current = recognition
     try {
       recognition.start()
@@ -201,16 +270,22 @@ export function useAutoMic(onFinalResult) {
   }
 
   function start() {
+    if (!supported) { giveUp('unsupported'); return }
     keepAliveRef.current = true
+    failuresRef.current = 0
+    setError('')
+    setListening(true)
     startInternal()
   }
 
   function stop() {
     keepAliveRef.current = false
     recognitionRef.current?.stop()
+    setListening(false)
+    setInterimText('')
   }
 
-  return { supported, listening, interimText, start, stop }
+  return { supported, listening, interimText, error, start, stop }
 }
 
 export async function streamAssistant({ message, conversationHistory = [], onDelta, onDone, onError }) {
