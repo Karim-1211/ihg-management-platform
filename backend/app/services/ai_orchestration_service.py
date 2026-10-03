@@ -34,9 +34,13 @@ from app.services.ai_staff_tool_registry import get_tool_definitions_for_role, d
 
 
 def _log_interaction(
-    db: Session, current_user: User, assistant_type: str, prompt_summary: str, tools_called: list[str],
+    db: Session, current_user: User | None, assistant_type: str, prompt_summary: str, tools_called: list[str],
     token_usage: int | None, status: str, model_used: str, error_message: str | None = None,
 ) -> None:
+    # A visitor without an account has no row to attribute an interaction
+    # to, so there is nothing to log. Browsing stays anonymous.
+    if current_user is None:
+        return
     try:
         log = AIInteractionLog(
             user_id=current_user.id,

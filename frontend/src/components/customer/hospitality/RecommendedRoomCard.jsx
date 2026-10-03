@@ -1,6 +1,5 @@
 import { useState } from 'react'
-import api from '../../../services/api'
-import { speakBrowserFallback } from '../../../lib/aliceVoice'
+import { narrateThenListen } from '../../../lib/aliceVoice'
 
 function Icon({ name, className = 'h-5 w-5' }) {
   const common = { className, fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }
@@ -11,11 +10,8 @@ function Icon({ name, className = 'h-5 w-5' }) {
       <path d="M19.07 4.93a10 10 0 0 1 0 14.14" />
     </svg>
   )
-  if (name === 'spinner') return (
-    <svg {...common}>
-      <circle cx="12" cy="12" r="9" opacity="0.25" />
-      <path d="M21 12a9 9 0 0 0-9-9" />
-    </svg>
+  if (name === 'stop') return (
+    <svg {...common}><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none" /></svg>
   )
   return null
 }
@@ -49,46 +45,24 @@ function ViewBadges({ room, compact }) {
 }
 
 export default function RecommendedRoomCard({ room, onBook, activeAudioRef, compact = false }) {
-  const [status, setStatus] = useState('idle')
-  const [narrationNote, setNarrationNote] = useState('')
+  const [speaking, setSpeaking] = useState(false)
 
-  async function narrate() {
-    setNarrationNote('')
-    if (status === 'playing') {
+  // Goes through the same speaking path as the rest of the conversation,
+  // rather than calling the voice service itself. That is what keeps one
+  // voice throughout: if the conversation has already fallen back to the
+  // browser voice, this card follows it instead of sounding different.
+  function narrate() {
+    if (speaking) {
       activeAudioRef.current?.pause()
-      activeAudioRef.current = null
       window.speechSynthesis?.cancel()
-      setStatus('idle')
+      // Invalidates the shared "is this still the current line?" token, so
+      // the stopped narration can't come back and finish.
+      activeAudioRef.speechToken = {}
+      setSpeaking(false)
       return
     }
-    activeAudioRef.current?.pause()
-    window.speechSynthesis?.cancel()
-    setStatus('loading')
-    try {
-      const response = await api.post('/ai/room-narration', { text: buildRoomNarration(room) }, { responseType: 'blob' })
-      const url = URL.createObjectURL(response.data)
-      const audio = new Audio(url)
-      activeAudioRef.current = audio
-      audio.onended = () => setStatus('idle')
-      audio.onerror = () => setStatus('idle')
-      setStatus('playing')
-      audio.play()
-    } catch (err) {
-      let message = 'Voice narration is unavailable right now.'
-      const data = err.response?.data
-      if (data instanceof Blob) {
-        try {
-          const text = await data.text()
-          const parsed = JSON.parse(text)
-          if (parsed?.detail) message = parsed.detail
-        } catch { /* keep generic */ }
-      } else if (data?.detail) {
-        message = data.detail
-      }
-      setNarrationNote(`${message} — using your browser's built-in voice instead.`)
-      speakBrowserFallback(buildRoomNarration(room))
-      setStatus('idle')
-    }
+    setSpeaking(true)
+    narrateThenListen(buildRoomNarration(room), activeAudioRef, true, () => setSpeaking(false))
   }
 
   const imgHeight = compact ? 'h-32' : 'h-48'
@@ -104,11 +78,10 @@ export default function RecommendedRoomCard({ room, onBook, activeAudioRef, comp
         <button
           type="button"
           onClick={narrate}
-          disabled={status === 'loading'}
-          className={`absolute bottom-2 right-2 flex items-center justify-center rounded-full text-white backdrop-blur-sm transition disabled:opacity-70 ${compact ? 'h-8 w-8' : 'h-10 w-10'} ${status === 'playing' ? 'bg-[#FF2147]' : 'bg-black/70 hover:bg-black/85'}`}
-          title={status === 'playing' ? 'Stop narration' : 'Hear about this room'}
+          className={`absolute bottom-2 right-2 flex items-center justify-center rounded-full text-white backdrop-blur-sm transition ${compact ? 'h-8 w-8' : 'h-10 w-10'} ${speaking ? 'bg-[#FF2147]' : 'bg-black/70 hover:bg-black/85'}`}
+          title={speaking ? 'Stop' : 'Hear about this room'}
         >
-          {status === 'loading' ? <Icon name="spinner" className="h-4 w-4 animate-spin" /> : <Icon name="speaker" className="h-4 w-4" />}
+          <Icon name={speaking ? 'stop' : 'speaker'} className="h-4 w-4" />
         </button>
       </div>
       <div className={compact ? 'p-3' : 'p-5'}>
@@ -116,7 +89,6 @@ export default function RecommendedRoomCard({ room, onBook, activeAudioRef, comp
         <h4 className={`mt-1 font-bold text-[#1F3A5F] ${compact ? 'text-sm' : 'text-lg'}`}>Room {room.room_number}</h4>
         {room.base_price != null && <p className={`mt-1 text-slate-500 ${compact ? 'text-xs' : 'text-sm'}`}>${Number(room.base_price).toFixed(2)} / night</p>}
         <ViewBadges room={room} compact={compact} />
-        {narrationNote && <p className="mt-2 text-xs text-amber-700">{narrationNote}</p>}
         <button type="button" onClick={() => onBook(room)} className={`mt-3 w-full rounded-xl bg-[#FF2147] font-bold text-white hover:bg-[#dc1539] ${compact ? 'py-2 text-xs' : 'py-2.5 text-sm'}`}>Book This Room</button>
       </div>
     </article>

@@ -1,7 +1,24 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import api from '../services/api'
 
 const POST_SPEECH_BUFFER_MS = 900
+
+// Alice's recorded clips are in the voice her LOCAL engine uses. On a
+// server that engine isn't installed, so live replies come from a hosted
+// voice instead — and mixing the two means two different voices in one
+// conversation. Setting VITE_ALICE_USE_CLIPS=false makes her speak every
+// line through the hosted voice, so a guest hears one voice throughout.
+const USE_CLIPS = import.meta.env.VITE_ALICE_USE_CLIPS !== 'false'
+
+// 'hosted' until a hosted voice fails, then 'browser' for the rest of the
+// page's life. Switching per line is what would produce two voices; this
+// switches the whole conversation at once. A reload starts at 'hosted'
+// again, so a refilled voice allowance is picked up by itself.
+let voiceMode = 'hosted'
+
+export function resetVoiceMode() {
+  voiceMode = 'hosted'
+}
 
 // Resolves true when speech genuinely finished, false when it was cut off
 // (cancelled or interrupted) — a cut-off utterance must never be treated as
@@ -12,7 +29,7 @@ export function speakBrowserFallback(text) {
     let settled = false
     const settle = (ok) => { if (!settled) { settled = true; resolve(ok) } }
     const utterance = new SpeechSynthesisUtterance(text)
-    utterance.rate = 0.9
+    utterance.rate = 0.95
     utterance.pitch = 1.0
     const voices = window.speechSynthesis.getVoices()
     const preferred =
@@ -26,9 +43,9 @@ export function speakBrowserFallback(text) {
   })
 }
 
-// Every new clip claims the audioRef with a fresh token. Anything belonging
-// to an older, superseded clip checks the token before acting, so a stale
-// clip can never start the browser voice or open the mic.
+// Every new line claims the audioRef with a fresh token. Anything belonging
+// to an older, superseded line checks the token before acting, so a stale
+// line can never start the browser voice or open the mic.
 function claim(audioRef) {
   const token = {}
   audioRef.speechToken = token
@@ -49,11 +66,7 @@ function armSafetyTimer(audio, text, onTimeout) {
   return () => window.clearTimeout(timer)
 }
 
-// Wires one <audio> element to the three possible outcomes:
-//   finished naturally   -> onReady (after a short buffer)
-//   stopped / superseded -> nothing at all
-//   genuinely blocked    -> browser voice, then onReady
-function playClip(audio, text, isCurrent, onReady, label) {
+function playAudio(audio, text, isCurrent, onReady, onFailed, label) {
   let done = false
   let clearSafety = () => {}
 
@@ -71,63 +84,60 @@ function playClip(audio, text, isCurrent, onReady, label) {
     done = true
     clearSafety()
   }
-  const fallback = async (reason) => {
+  const failed = (reason) => {
     if (done) return
     done = true
     clearSafety()
     if (!isCurrent()) return
-    console.warn(`[Alice] ${reason}, using browser voice for:`, label)
-    const finishedNaturally = await speakBrowserFallback(text)
-    if (finishedNaturally && isCurrent()) readyAfterBuffer()
+    console.warn(`[Alice] ${reason} for:`, label)
+    onFailed()
   }
 
   audio.addEventListener('ended', complete)
-  // A pause that isn't the natural end means the clip was deliberately
+  // A pause that isn't the natural end means the line was deliberately
   // stopped — by a newer line, a navigation, or the component unmounting.
   audio.addEventListener('pause', () => { if (!audio.ended) cancel() })
-  audio.addEventListener('error', () => fallback('Audio failed'))
+  audio.addEventListener('error', () => failed('Audio failed'))
   clearSafety = armSafetyTimer(audio, text, complete)
 
   audio.play().catch((err) => {
     // AbortError = play() was interrupted by pause(): an intentional stop,
-    // NOT an autoplay block. Treating it as a block is what produced the
-    // second (robotic) voice and the early mic.
+    // NOT a playback failure.
     if (err?.name === 'AbortError' || !isCurrent()) { cancel(); return }
-    fallback('Autoplay blocked')
+    failed('Playback blocked')
   })
 }
 
-async function speakWithBrowserVoice(text, isCurrent, onReady) {
+async function speakWithBrowser(text, isCurrent, onReady) {
   const finishedNaturally = await speakBrowserFallback(text)
   if (finishedNaturally && isCurrent()) {
     window.setTimeout(() => { if (isCurrent()) onReady() }, POST_SPEECH_BUFFER_MS)
   }
 }
 
-export function speakThenListen(file, text, audioRef, voiceEnabled, onReady) {
-  if (!voiceEnabled) { onReady(); return }
-  audioRef.current?.pause()
-  window.speechSynthesis?.cancel()
-  const isCurrent = claim(audioRef)
-  const audio = new Audio(file)
-  audioRef.current = audio
-  playClip(audio, text, isCurrent, onReady, file)
-}
-
-export async function narrateThenListen(text, audioRef, voiceEnabled, onReady) {
+// The single path every spoken line takes, so one conversation can never
+// mix voices. `file` is an optional pre-recorded clip, used only when the
+// clips match the voice this build speaks with.
+async function speak(file, text, audioRef, voiceEnabled, onReady) {
   if (!voiceEnabled || !text?.trim()) { onReady(); return }
   audioRef.current?.pause()
   window.speechSynthesis?.cancel()
-  // Claimed BEFORE the network wait, so a newer line spoken while this one
-  // is still being generated makes this one stand down instead of playing.
+  // Claimed BEFORE any network wait, so a newer line spoken while this one
+  // is still being fetched makes this one stand down instead of playing.
   const isCurrent = claim(audioRef)
 
-  // The narration endpoint is for signed-in guests only. A signed-out
-  // visitor gets the browser's voice directly: calling the server would
-  // only be refused — and a refusal sent them to the login page mid-sentence.
-  // It also keeps hosted voice credits for guests with an account.
-  if (!localStorage.getItem('ihg_token')) {
-    await speakWithBrowserVoice(text, isCurrent, onReady)
+  if (voiceMode === 'browser') {
+    await speakWithBrowser(text, isCurrent, onReady)
+    return
+  }
+
+  if (file && USE_CLIPS) {
+    const audio = new Audio(file)
+    audioRef.current = audio
+    playAudio(audio, text, isCurrent, onReady, () => {
+      voiceMode = 'browser'
+      speakWithBrowser(text, isCurrent, onReady)
+    }, file)
     return
   }
 
@@ -138,152 +148,217 @@ export async function narrateThenListen(text, audioRef, voiceEnabled, onReady) {
     const audio = new Audio(url)
     audioRef.current = audio
     audio.addEventListener('ended', () => URL.revokeObjectURL(url))
-    playClip(audio, text, isCurrent, onReady, 'live narration')
+    playAudio(audio, text, isCurrent, onReady, () => {
+      voiceMode = 'browser'
+      speakWithBrowser(text, isCurrent, onReady)
+    }, 'live narration')
   } catch {
-    // Includes a 503 from the server: no hosted voice answered.
+    // No hosted voice answered — the voice allowance may be spent, or the
+    // provider unreachable. The REST of this conversation uses the browser
+    // voice, rather than alternating between the two.
     if (!isCurrent()) return
-    await speakWithBrowserVoice(text, isCurrent, onReady)
+    console.warn('[Alice] hosted voice unavailable — using the browser voice for this session.')
+    voiceMode = 'browser'
+    await speakWithBrowser(text, isCurrent, onReady)
   }
 }
 
-// What each recognition failure means, in words a guest understands.
-const MIC_ERROR_MESSAGES = {
-  'not-allowed': "I can't use your microphone — please allow microphone access for this site, or type your answer below.",
-  'service-not-allowed': "Voice input is blocked in this browser — please type your answer below.",
-  'audio-capture': "I can't find a microphone on this device — please type your answer below.",
-  'network': "I can't reach the speech service right now, so I can't hear you — please type your answer below.",
-  'language-not-supported': "Voice input isn't available in this browser — please type your answer below.",
-  'unsupported': "Voice input isn't supported in this browser — please type your answer below.",
+export function speakThenListen(file, text, audioRef, voiceEnabled, onReady) {
+  speak(file, text, audioRef, voiceEnabled, onReady)
 }
-// Errors that will not fix themselves by retrying.
-const FATAL_MIC_ERRORS = new Set(['not-allowed', 'service-not-allowed', 'audio-capture', 'language-not-supported'])
-const MAX_CONSECUTIVE_MIC_FAILURES = 3
 
-// One shared recognition instance. Keeps itself listening across the
-// browser's own silence timeout, and discards anything reported "final"
-// within 400ms of starting (leftover echo of Alice's own voice).
-//
-// `listening` stays true for as long as listening is WANTED, including the
-// brief restarts between attempts — so the indicator holds steady instead
-// of blinking. Real failures are counted: after a few in a row (or one that
-// can't fix itself) it stops and reports `error`, rather than retrying
-// forever behind a "Listening…" that never hears anything.
+export function narrateThenListen(text, audioRef, voiceEnabled, onReady) {
+  speak(null, text, audioRef, voiceEnabled, onReady)
+}
+
+// ---------- Listening ----------
+
+const SILENCE_AFTER_SPEECH_MS = 1300
+const NO_SPEECH_TIMEOUT_MS = 9000
+const MAX_RECORDING_MS = 20000
+const SPEECH_LEVEL = 0.014
+
+const MIC_MESSAGES = {
+  denied: "I can't use your microphone — please allow microphone access for this site, or type your answer below.",
+  noDevice: "I can't find a microphone on this device — please type your answer below.",
+  unsupported: "Voice input isn't supported in this browser — please type your answer below.",
+  failed: "I'm having trouble hearing you right now — please type your answer below.",
+}
+
+function pickMimeType() {
+  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4', '']
+  for (const type of candidates) {
+    if (!type) return ''
+    if (window.MediaRecorder?.isTypeSupported?.(type)) return type
+  }
+  return ''
+}
+
+// Records the guest's voice in the page and sends it to the backend to be
+// transcribed, instead of using the browser's own voice typing. That
+// depends on a speech service run by the browser's vendor, which stopped
+// working in Chrome without warning and doesn't exist in some browsers.
+// Here the same microphone behaves identically everywhere.
 export function useAutoMic(onFinalResult) {
   const [listening, setListening] = useState(false)
   const [interimText, setInterimText] = useState('')
   const [error, setError] = useState('')
-  const supported = typeof window !== 'undefined' && !!(window.SpeechRecognition || window.webkitSpeechRecognition)
-  const recognitionRef = useRef(null)
+
+  const supported = typeof window !== 'undefined'
+    && !!navigator.mediaDevices?.getUserMedia
+    && typeof window.MediaRecorder !== 'undefined'
+
   const callbackRef = useRef(onFinalResult)
-  const keepAliveRef = useRef(false)
-  const gotResultRef = useRef(false)
-  const restartScheduledRef = useRef(false)
-  const failuresRef = useRef(0)
+  const streamRef = useRef(null)
+  const recorderRef = useRef(null)
+  const contextRef = useRef(null)
+  const frameRef = useRef(null)
+  const timersRef = useRef([])
+  const wantedRef = useRef(false)
   useEffect(() => { callbackRef.current = onFinalResult })
 
-  function giveUp(code) {
-    keepAliveRef.current = false
+  const cleanup = useCallback(() => {
+    timersRef.current.forEach((t) => window.clearTimeout(t))
+    timersRef.current = []
+    if (frameRef.current) { window.cancelAnimationFrame(frameRef.current); frameRef.current = null }
+    try { recorderRef.current?.state === 'recording' && recorderRef.current.stop() } catch { /* already stopped */ }
+    recorderRef.current = null
+    try { contextRef.current?.close() } catch { /* already closed */ }
+    contextRef.current = null
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+  }, [])
+
+  const stop = useCallback(() => {
+    wantedRef.current = false
+    cleanup()
     setListening(false)
     setInterimText('')
-    setError(MIC_ERROR_MESSAGES[code] || "I'm having trouble hearing you right now — please type your answer below.")
-  }
+  }, [cleanup])
 
-  function scheduleRestart() {
-    if (restartScheduledRef.current) return
-    restartScheduledRef.current = true
-    window.setTimeout(() => {
-      restartScheduledRef.current = false
-      if (keepAliveRef.current) startInternal()
-    }, 350)
-  }
-
-  function startInternal() {
-    if (!supported || recognitionRef.current) return
-    const Impl = window.SpeechRecognition || window.webkitSpeechRecognition
-    const recognition = new Impl()
-    recognition.lang = 'en-US'
-    recognition.interimResults = true
-    recognition.continuous = false
-    recognition.maxAlternatives = 1
-    gotResultRef.current = false
-    setInterimText('')
-    const startedAt = Date.now()
-
-    recognition.onresult = (event) => {
-      const last = event.results[event.results.length - 1]
-      const transcript = last[0].transcript
-      if (last.isFinal) {
-        if (Date.now() - startedAt < 400) return
-        gotResultRef.current = true
-        failuresRef.current = 0
-        setInterimText('')
-        console.log('[Alice] heard:', JSON.stringify(transcript))
-        callbackRef.current(transcript.trim())
-      } else {
-        setInterimText(transcript)
-      }
-    }
-
-    recognition.onend = () => {
-      recognitionRef.current = null
-      setInterimText('')
-      // Still wanted and nothing heard yet: restart quietly, keeping the
-      // indicator steady.
-      if (keepAliveRef.current && !gotResultRef.current) {
-        scheduleRestart()
-        return
-      }
-      setListening(false)
-    }
-
-    recognition.onerror = (e) => {
-      recognitionRef.current = null
-      setInterimText('')
-      const code = e?.error || 'unknown'
-
-      // Silence is normal: the browser stops after a few quiet seconds,
-      // and onend restarts it.
-      if (code === 'no-speech') return
-
-      // Stopped on purpose, or taken over by another listener.
-      if (code === 'aborted') {
-        keepAliveRef.current = false
-        setListening(false)
-        return
-      }
-
-      console.warn('[Alice] microphone error:', code)
-      failuresRef.current += 1
-      if (FATAL_MIC_ERRORS.has(code) || failuresRef.current >= MAX_CONSECUTIVE_MIC_FAILURES) {
-        giveUp(code)
-      }
-      // Otherwise onend fires next and retries.
-    }
-
-    recognitionRef.current = recognition
-    try {
-      recognition.start()
-      setListening(true)
-    } catch {
-      recognitionRef.current = null
-    }
-  }
-
-  function start() {
-    if (!supported) { giveUp('unsupported'); return }
-    keepAliveRef.current = true
-    failuresRef.current = 0
+  const start = useCallback(async () => {
+    if (!supported) { setError(MIC_MESSAGES.unsupported); return }
+    if (wantedRef.current) return
+    wantedRef.current = true
     setError('')
-    setListening(true)
-    startInternal()
-  }
-
-  function stop() {
-    keepAliveRef.current = false
-    recognitionRef.current?.stop()
-    setListening(false)
     setInterimText('')
-  }
+    setListening(true)
+
+    let stream
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      })
+    } catch (err) {
+      wantedRef.current = false
+      setListening(false)
+      const name = err?.name || ''
+      setError(name === 'NotAllowedError' || name === 'SecurityError'
+        ? MIC_MESSAGES.denied
+        : name === 'NotFoundError' ? MIC_MESSAGES.noDevice : MIC_MESSAGES.failed)
+      return
+    }
+
+    if (!wantedRef.current) { stream.getTracks().forEach((t) => t.stop()); return }
+    streamRef.current = stream
+
+    const mimeType = pickMimeType()
+    let recorder
+    try {
+      recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+    } catch {
+      stop()
+      setError(MIC_MESSAGES.failed)
+      return
+    }
+    recorderRef.current = recorder
+
+    const chunks = []
+    let heardSpeech = false
+    let finished = false
+
+    recorder.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data) }
+
+    recorder.onstop = async () => {
+      const wasWanted = wantedRef.current
+      cleanup()
+      setListening(false)
+      setInterimText('')
+      if (!wasWanted) return
+      wantedRef.current = false
+
+      // Nothing but silence: say nothing and leave the guest to type.
+      if (!heardSpeech || !chunks.length) return
+
+      const blob = new Blob(chunks, { type: mimeType || 'audio/webm' })
+      if (blob.size < 1200) return
+
+      try {
+        setInterimText('…')
+        const form = new FormData()
+        form.append('audio', blob, mimeType.includes('mp4') ? 'speech.mp4' : 'speech.webm')
+        const response = await api.post('/ai/transcribe', form)
+        setInterimText('')
+        const text = (response.data?.text || '').trim()
+        if (text) callbackRef.current(text)
+      } catch (err) {
+        setInterimText('')
+        setError(err.response?.data?.detail || MIC_MESSAGES.failed)
+      }
+    }
+
+    // Stops as soon as the guest has finished speaking, so Alice replies
+    // promptly instead of waiting out a fixed recording length.
+    const finish = () => {
+      if (finished) return
+      finished = true
+      try { recorder.state === 'recording' && recorder.stop() } catch { /* already stopped */ }
+    }
+
+    try {
+      const context = new (window.AudioContext || window.webkitAudioContext)()
+      contextRef.current = context
+      const analyser = context.createAnalyser()
+      analyser.fftSize = 1024
+      context.createMediaStreamSource(stream).connect(analyser)
+      const samples = new Float32Array(analyser.fftSize)
+      let quietSince = 0
+
+      const tick = () => {
+        if (finished || !wantedRef.current) return
+        analyser.getFloatTimeDomainData(samples)
+        let sum = 0
+        for (let i = 0; i < samples.length; i += 1) sum += samples[i] * samples[i]
+        const level = Math.sqrt(sum / samples.length)
+
+        if (level > SPEECH_LEVEL) {
+          if (!heardSpeech) { heardSpeech = true; setInterimText('') }
+          quietSince = 0
+        } else if (heardSpeech) {
+          if (!quietSince) quietSince = Date.now()
+          else if (Date.now() - quietSince > SILENCE_AFTER_SPEECH_MS) { finish(); return }
+        }
+        frameRef.current = window.requestAnimationFrame(tick)
+      }
+      frameRef.current = window.requestAnimationFrame(tick)
+    } catch {
+      // No audio analysis available: fall back to a fixed recording length.
+      heardSpeech = true
+      timersRef.current.push(window.setTimeout(finish, 6000))
+    }
+
+    timersRef.current.push(window.setTimeout(() => { if (!heardSpeech) finish() }, NO_SPEECH_TIMEOUT_MS))
+    timersRef.current.push(window.setTimeout(finish, MAX_RECORDING_MS))
+
+    try {
+      recorder.start()
+    } catch {
+      stop()
+      setError(MIC_MESSAGES.failed)
+    }
+  }, [supported, cleanup, stop])
+
+  useEffect(() => () => { wantedRef.current = false; cleanup() }, [cleanup])
 
   return { supported, listening, interimText, error, start, stop }
 }
@@ -298,9 +373,13 @@ export async function streamAssistant({ message, conversationHistory = [], onDel
       body: JSON.stringify({ message, conversation_history: conversationHistory }),
     })
 
-    if (response.status === 401) {
-      localStorage.removeItem('ihg_token')
-      if (window.location.pathname !== '/login') window.location.href = '/login'
+    // Previously this cleared the login and jumped the whole site to the
+    // login page, losing the page and the conversation. A refusal is now
+    // reported in the chat, so the guest decides what to do next.
+    if (response.status === 401 || response.status === 403) {
+      onError(token
+        ? 'Your session has expired — please sign in again to carry on.'
+        : "I'll need you to sign in before I can look that up for you.")
       return
     }
     if (!response.ok || !response.body) throw new Error('Stream request failed')

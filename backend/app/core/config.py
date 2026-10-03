@@ -74,6 +74,12 @@ class Settings(BaseSettings):
     groq_tts_model: str | None = None
     groq_tts_voice: str | None = None
 
+    # Speech-to-TEXT, used by Alice's microphone. Groq's free tier covers
+    # 2,000 transcriptions a day with no card, which is far beyond what this
+    # platform needs. A setting rather than a constant, because providers
+    # rename their speech models often.
+    groq_stt_model: str = "whisper-large-v3-turbo"
+
     # Phase 24.2: environment-driven CORS. In development, defaults to the
     # local Vite dev server so local work needs zero configuration. In
     # production, this MUST be set explicitly via the CORS_ALLOWED_ORIGINS

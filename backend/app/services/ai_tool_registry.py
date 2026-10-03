@@ -352,7 +352,9 @@ def _tool_get_room_recommendations(
             result["note"] = "No available room currently matches that specific request for these dates."
         return result
 
-    past_bookings = booking_service.list_bookings(db, guest_id=current_user.id)
+    # A visitor without an account has no history, which is simply the
+    # un-personalised case — not an error. Room search works for everyone.
+    past_bookings = booking_service.list_bookings(db, guest_id=current_user.id) if current_user else []
     if not past_bookings:
         result["note"] = "No booking history yet, so this is not personalized — showing general availability."
         result["available_rooms"] = available_details[:10]
@@ -561,11 +563,33 @@ TOOL_DISPATCH = {
 }
 
 
-def dispatch_tool(db: Session, current_user: User, tool_name: str, tool_input: dict) -> dict:
+# Tools that read one particular guest's own records. Everything else —
+# hotels, room types, menus, policies, table availability, room search —
+# is public information a visitor can see before creating an account.
+PERSONAL_TOOLS = {
+    "get_my_bookings",
+    "get_my_active_stay",
+    "get_my_service_requests",
+    "get_my_orders",
+    "get_my_reservations",
+    "get_my_invoices",
+    "get_menu_recommendations",
+}
+
+
+def dispatch_tool(db: Session, current_user: User | None, tool_name: str, tool_input: dict) -> dict:
     fn = TOOL_DISPATCH.get(tool_name)
     if fn is None:
         return {"error": "Unknown tool."}
+    if current_user is None and tool_name in PERSONAL_TOOLS:
+        # Phrased for the model to relay: it should invite the visitor to
+        # sign in, not apologise for a failure that didn't happen.
+        return {
+            "error": "This guest is browsing without signing in, so their personal records "
+                     "aren't available. Invite them warmly to sign in to see this, and offer "
+                     "to help with anything else meanwhile."
+        }
     try:
         return fn(db, current_user, **tool_input)
-    except Exception as e:
+    except Exception:
         return {"error": "This information isn't available right now."}

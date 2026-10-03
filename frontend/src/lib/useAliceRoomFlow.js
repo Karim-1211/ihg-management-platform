@@ -286,19 +286,8 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
     const v = value ?? guests
     setGuests(v)
 
-    // The live search needs an account. Previously a signed-out guest hit a
-    // refused request that reloaded the whole site onto the login page,
-    // losing the page and everything they'd told Alice. Now she explains,
-    // then sends them to sign in properly and back to this page.
-    if (!user) {
-      mic.stop()
-      setLog((l) => [...l, { from: 'user', text: `${v} guest${v === 1 ? '' : 's'}` }, { from: 'alice', text: SMALL_TALK_LINES.signInToSearch }])
-      narrateThenListen(SMALL_TALK_LINES.signInToSearch, activeAudioRef, voiceEnabled, () => {
-        requireAuth(user, navigate, location, { reason: 'Please sign in so Alice can check live availability for your dates.' })
-      })
-      return
-    }
-
+    // Room search is open to everyone: a visitor can see real availability
+    // before creating an account. Signing in is needed only at booking.
     setLog((l) => [...l, { from: 'user', text: `${v} guest${v === 1 ? '' : 's'}` }, { from: 'alice', text: ALICE_ROOM_LINES.checking.text }])
     mic.stop()
     setStep('searching')

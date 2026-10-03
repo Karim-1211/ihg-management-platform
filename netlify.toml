@@ -9,6 +9,10 @@
     # The backend address, built into the site at build time. Not a secret:
     # it ends up in the browser's JavaScript either way.
     VITE_API_URL = "https://ihg-management-platform.onrender.com/api/v1"
+    # Alice's recorded clips are in her local voice, which the server can't
+    # run. Turning them off here makes her speak every line in one hosted
+    # voice, instead of alternating between two.
+    VITE_ALICE_USE_CLIPS = "false"
 
 # The site is a single-page app: every address is handled by index.html.
 # Without this, refreshing a page such as /hotels/... returns Netlify's 404.
