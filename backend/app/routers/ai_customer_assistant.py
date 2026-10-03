@@ -45,5 +45,11 @@ def room_narration(
     data: AIRoomNarrationRequest,
     current_user: User = Depends(require_roles(RoleEnum.CUSTOMER)),
 ):
-    audio_bytes = tts_service.synthesize_speech(data.text)
-    return Response(content=audio_bytes, media_type="audio/wav")
+    # A 503 from here means no voice provider answered; the frontend then
+    # falls back to the browser's built-in voice.
+    audio_bytes, provider = tts_service.synthesize_speech_with_provider(data.text)
+    return Response(
+        content=audio_bytes,
+        media_type="audio/wav",
+        headers={"X-TTS-Provider": provider},
+    )

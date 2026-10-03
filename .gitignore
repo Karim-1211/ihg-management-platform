@@ -2,8 +2,12 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv*/
 venv/
 .env
+
+# Database backups — contain password hashes and guest data
+*.sql
 
 # FastAPI / tooling
 .pytest_cache/
@@ -15,6 +19,9 @@ node_modules/
 dist/
 npm-debug.log*
 yarn-debug.log*
+
+# Netlify
+.netlify/
 
 # IDE
 .idea/
