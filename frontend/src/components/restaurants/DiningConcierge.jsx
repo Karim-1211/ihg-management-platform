@@ -30,6 +30,12 @@ const LINES = {
 
 const DELIVERY_GREETING = "Hello, I'm Alice, your delivery concierge. I can help you choose something delicious, tell you exactly where your order is, or answer any other question."
 
+// After this many answers in a row that Alice couldn't use, she stops
+// reopening the microphone and hands over to the buttons and keyboard.
+// A microphone that reopens forever after every unclear answer is how a
+// conversation ends up carrying on by itself.
+const MAX_UNCLEAR_IN_A_ROW = 2
+
 const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']
 const NUMBER_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 }
 // Speech recognition regularly mishears small numbers as these words —
@@ -243,7 +249,50 @@ function Icon({ name, className = 'h-4 w-4' }) {
   const c = { className, fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }
   if (name === 'speaker') return <svg {...c}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none" /><path d="M15.54 8.46a5 5 0 0 1 0 7.07" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14" /></svg>
   if (name === 'muted') return <svg {...c}><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" stroke="none" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></svg>
+  if (name === 'mic') return <svg {...c}><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" /></svg>
   return null
+}
+
+// The red indicator above the buttons. Whisper transcribes a finished
+// recording, so there are no partial words to show while the guest speaks;
+// the moving bar is how they can see they are being heard.
+function MicStatus({ mic }) {
+  if (mic.error) {
+    return <p className="mt-3 text-center text-xs font-semibold text-amber-600">{mic.error}</p>
+  }
+  if (mic.transcribing) {
+    return <p className="mt-3 text-center text-xs font-semibold text-[#FF2147]">✍️ Writing that down…</p>
+  }
+  if (!mic.listening) return null
+  return (
+    <div className="mt-3 flex items-center justify-center gap-2">
+      <span className="text-xs font-semibold text-[#FF2147]">🎙 Listening…</span>
+      <span className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-200">
+        <span
+          className="block h-full rounded-full bg-[#FF2147] transition-[width] duration-75"
+          style={{ width: `${Math.round((mic.level || 0) * 100)}%` }}
+        />
+      </span>
+    </div>
+  )
+}
+
+// Lets the guest speak again after Alice has stopped listening.
+function MicToggle({ mic }) {
+  if (!mic.supported) return null
+  return (
+    <button
+      type="button"
+      onClick={() => (mic.listening ? mic.stop() : mic.start())}
+      disabled={mic.transcribing}
+      aria-label={mic.listening ? 'Stop listening' : 'Speak your answer'}
+      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors disabled:opacity-50 ${
+        mic.listening ? 'animate-pulse bg-[#FF2147] text-white' : 'bg-slate-100 text-[#1F3A5F] hover:bg-slate-200'
+      }`}
+    >
+      <Icon name="mic" className="h-4 w-4" />
+    </button>
+  )
 }
 
 export default function DiningConcierge({
@@ -272,6 +321,8 @@ export default function DiningConcierge({
   const menuRef = useRef([])
   const cartRef = useRef({})
   const historyRef = useRef([])
+  // Answers in a row that Alice couldn't use. Reset by any answer she can.
+  const unclearRef = useRef(0)
   // Incremented whenever a new request starts or the guest starts over; a
   // result that arrives for an older run is discarded instead of shown.
   const runRef = useRef(0)
@@ -364,11 +415,28 @@ export default function DiningConcierge({
     speakLine(line)
   }
 
+  // Says Alice couldn't use the guest's answer and listens again — but only
+  // MAX_UNCLEAR_IN_A_ROW times, after which she hands over to the keyboard.
+  function retryOrHandOver(lineKey) {
+    unclearRef.current += 1
+    if (unclearRef.current > MAX_UNCLEAR_IN_A_ROW) { handOverToKeyboard(); return }
+    say(lineKey)
+  }
+
+  function handOverToKeyboard() {
+    mic.stop()
+    unclearRef.current = 0
+    const line = "I'm having trouble catching that — please use the buttons or the box below, or tap the microphone to try again."
+    setLog((l) => [...l, { from: 'alice', text: line }])
+    narrateThenListen(line, audioRef, voiceEnabled, () => {})
+  }
+
   // On first activation Alice introduces herself in the same clip as her
   // first question; after that she goes straight to the point.
   function begin(userText, introKey, followUpKey, nextStep) {
     mic.stop()
     runRef.current += 1
+    unclearRef.current = 0
     const first = !introducedRef.current
     introducedRef.current = true
     setError('')
@@ -422,7 +490,7 @@ export default function DiningConcierge({
       const message = "I couldn't reach your orders just now. Please try again in a moment."
       setStep('tracked')
       setLog((l) => [...l, { from: 'alice', text: message }])
-      narrateThenListen(message, audioRef, voiceEnabled, () => mic.start())
+      narrateThenListen(message, audioRef, voiceEnabled, () => {})
       return
     }
     if (run !== runRef.current) return
@@ -443,6 +511,7 @@ export default function DiningConcierge({
     // overlap an unfinished line.
     stopAll()
     runRef.current += 1
+    unclearRef.current = 0
     const run = runRef.current
     setError('')
     setStep('answering')
@@ -490,7 +559,7 @@ export default function DiningConcierge({
     const s = stepRef.current
 
     if (s === 'mode' || s === 'tracked') {
-      if (isDelivery) { setLog((l) => l); routeDeliveryIntent(transcript); return }
+      if (isDelivery) { routeDeliveryIntent(transcript); return }
       if (/\b(table|reserve|reservation|book|booking)\b/i.test(transcript)) { chooseReserve(transcript); return }
       if (/\b(deliver|delivery)\b/i.test(transcript)) { chooseOrder(transcript, 'delivery'); return }
       if (/\b(food|eat|order|menu|hungry|dish|dinner|lunch)\b/i.test(transcript)) { chooseOrder(transcript, 'dine'); return }
@@ -502,32 +571,35 @@ export default function DiningConcierge({
     }
     if (s === 'date') {
       const p = parseSpokenDate(transcript)
-      if (p) { setDate(p); setLog((l) => [...l, { from: 'user', text: transcript }]); window.setTimeout(() => say('askTime', 'time'), 400) }
-      else say('retryDate')
+      if (p) { unclearRef.current = 0; setDate(p); setLog((l) => [...l, { from: 'user', text: transcript }]); window.setTimeout(() => say('askTime', 'time'), 400) }
+      else retryOrHandOver('retryDate')
       return
     }
     if (s === 'time') {
       const p = parseSpokenTime(transcript)
-      if (p) { setTime(p); setLog((l) => [...l, { from: 'user', text: transcript }]); window.setTimeout(() => say('askParty', 'party'), 400) }
-      else say('retryTime')
+      if (p) { unclearRef.current = 0; setTime(p); setLog((l) => [...l, { from: 'user', text: transcript }]); window.setTimeout(() => say('askParty', 'party'), 400) }
+      else retryOrHandOver('retryTime')
       return
     }
     if (s === 'party') {
       const p = parseSpokenParty(transcript)
-      if (p) { setPartySize(p); setLog((l) => [...l, { from: 'user', text: transcript }]); window.setTimeout(() => findTables(p), 400) }
-      else say('retryParty')
+      if (p) { unclearRef.current = 0; setPartySize(p); setLog((l) => [...l, { from: 'user', text: transcript }]); window.setTimeout(() => findTables(p), 400) }
+      else retryOrHandOver('retryParty')
       return
     }
     if (s === 'tables') {
       const match = parseSpokenTable(transcript, tablesRef.current)
       setLog((l) => [...l, { from: 'user', text: transcript }])
       if (match) {
+        unclearRef.current = 0
         mic.stop()
         const line = `Taking you through to reserve table ${match.table_number}.`
         setLog((l) => [...l, { from: 'alice', text: line }])
         narrateThenListen(line, audioRef, voiceEnabled, () => {})
         window.setTimeout(() => goReserve(match), 900)
       } else {
+        unclearRef.current += 1
+        if (unclearRef.current > MAX_UNCLEAR_IN_A_ROW) { handOverToKeyboard(); return }
         const numbers = tablesRef.current.slice(0, 4).map((tb) => tb.table_number).join(', ')
         const line = `I didn't catch which table. You can say the number — for example ${numbers} — or tap one below.`
         setLog((l) => [...l, { from: 'alice', text: line }])
@@ -561,10 +633,15 @@ export default function DiningConcierge({
     if (named) { addToCart(named); return }
 
     if (/\b(something different|something else|another|different)\b/.test(t)) {
+      unclearRef.current = 0
       say('askCravings', 'cravings')
       return
     }
 
+    // Alice didn't understand. This line used to reopen the microphone
+    // every single time — the loop that kept the chat talking to itself.
+    unclearRef.current += 1
+    if (unclearRef.current > MAX_UNCLEAR_IN_A_ROW) { handOverToKeyboard(); return }
     const line = "Of course — just say \"add it\", name the dish you'd like, or say \"that's all\" and I'll take you to checkout."
     setLog((l) => [...l, { from: 'alice', text: line }])
     narrateThenListen(line, audioRef, voiceEnabled, () => mic.start())
@@ -572,6 +649,7 @@ export default function DiningConcierge({
 
   function addToCart(item) {
     mic.stop()
+    unclearRef.current = 0
     const nextCart = { ...cartRef.current, [item.id]: (cartRef.current[item.id] || 0) + 1 }
     setCart(nextCart)
     cartRef.current = nextCart
@@ -687,6 +765,7 @@ export default function DiningConcierge({
   async function askMenu(text) {
     mic.stop()
     runRef.current += 1
+    unclearRef.current = 0
     const run = runRef.current
     setError('')
     setStep('menuSearching')
@@ -756,6 +835,7 @@ export default function DiningConcierge({
   function restart() {
     stopAll()
     runRef.current += 1
+    unclearRef.current = 0
     setStep('mode')
     setTables([])
     setTracked([])
@@ -833,11 +913,7 @@ export default function DiningConcierge({
 
       {error && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
 
-      {mic.listening && (
-        <p className="mt-3 text-center text-xs font-semibold text-[#FF2147]">
-          🎙 Listening… {mic.interimText ? `"${mic.interimText}"` : ''}
-        </p>
-      )}
+      <MicStatus mic={mic} />
 
       <div className="mt-4">
         {step === 'mode' && isDelivery && (
@@ -895,6 +971,7 @@ export default function DiningConcierge({
               className="flex gap-2"
             >
               <input value={question} onChange={(e) => setQuestion(e.target.value)} placeholder="Ask Alice anything…" className={`flex-1 rounded-xl border border-slate-300 outline-none focus:border-[#1F3A5F] ${field}`} />
+              <MicToggle mic={mic} />
               <button type="submit" disabled={!question.trim()} className={`rounded-xl bg-[#1F3A5F] font-bold text-white hover:bg-[#162f4d] disabled:opacity-50 ${btn}`}>Ask</button>
             </form>
             <div className="mt-3 flex flex-wrap justify-center gap-x-5 gap-y-1 text-xs font-bold text-[#1F3A5F]">
@@ -918,6 +995,7 @@ export default function DiningConcierge({
         {step === 'date' && (
           <form onSubmit={(e) => { e.preventDefault(); if (date) { setLog((l) => [...l, { from: 'user', text: date }]); say('askTime', 'time') } }} className="flex gap-2">
             <input required min={today} type="date" value={date} onChange={(e) => setDate(e.target.value)} className={`flex-1 rounded-xl border border-slate-300 outline-none focus:border-[#1F3A5F] ${field}`} />
+            <MicToggle mic={mic} />
             <button type="submit" disabled={!date} className={`rounded-xl bg-[#1F3A5F] font-bold text-white hover:bg-[#162f4d] disabled:opacity-50 ${btn}`}>Continue</button>
           </form>
         )}
@@ -925,6 +1003,7 @@ export default function DiningConcierge({
         {step === 'time' && (
           <form onSubmit={(e) => { e.preventDefault(); if (time) { setLog((l) => [...l, { from: 'user', text: time }]); say('askParty', 'party') } }} className="flex gap-2">
             <input required type="time" value={time} onChange={(e) => setTime(e.target.value)} className={`flex-1 rounded-xl border border-slate-300 outline-none focus:border-[#1F3A5F] ${field}`} />
+            <MicToggle mic={mic} />
             <button type="submit" disabled={!time} className={`rounded-xl bg-[#1F3A5F] font-bold text-white hover:bg-[#162f4d] disabled:opacity-50 ${btn}`}>Continue</button>
           </form>
         )}
@@ -934,6 +1013,7 @@ export default function DiningConcierge({
             <select value={partySize} onChange={(e) => setPartySize(Number(e.target.value))} className={`flex-1 rounded-xl border border-slate-300 outline-none focus:border-[#1F3A5F] ${field}`}>
               {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => <option key={n} value={n}>{n} {n === 1 ? 'Guest' : 'Guests'}</option>)}
             </select>
+            <MicToggle mic={mic} />
             <button type="submit" className={`rounded-xl bg-[#FF2147] font-bold text-white hover:bg-[#dc1539] ${btn}`}>Find tables</button>
           </form>
         )}
@@ -945,6 +1025,7 @@ export default function DiningConcierge({
         {step === 'cravings' && (
           <form onSubmit={(e) => { e.preventDefault(); if (cravings.trim()) askMenu(cravings.trim()) }} className="flex gap-2">
             <input value={cravings} onChange={(e) => setCravings(e.target.value)} placeholder="e.g. something spicy and vegetarian" className={`flex-1 rounded-xl border border-slate-300 outline-none focus:border-[#1F3A5F] ${field}`} />
+            <MicToggle mic={mic} />
             <button type="submit" disabled={!cravings.trim()} className={`rounded-xl bg-[#FF2147] font-bold text-white hover:bg-[#dc1539] disabled:opacity-50 ${btn}`}>Ask</button>
           </form>
         )}

@@ -48,6 +48,47 @@ const DELIVERY_WELCOME = "Hello, I'm Alice, your delivery concierge. I can help 
 
 const SUBTITLES = { hotel: 'Your AI Concierge', dining: 'AI Dining Concierge', delivery: 'AI Delivery Concierge' }
 
+// The red indicator above the message box, with a live bar that moves with
+// the guest's voice. Whisper transcribes a finished recording, so there are
+// no partial words to show while they speak — the bar is how they can see
+// they're being heard.
+function MicIndicator({ mic }) {
+  if (mic.error) {
+    return <p className="bg-white px-4 pt-2 text-center text-[11px] font-semibold text-amber-600">{mic.error}</p>
+  }
+  if (mic.transcribing) {
+    return <p className="bg-white px-4 pt-2 text-center text-[11px] font-semibold text-[#FF2147]">✍️ Writing that down…</p>
+  }
+  if (!mic.listening) return null
+  return (
+    <div className="flex items-center justify-center gap-2 bg-white px-4 pt-2">
+      <span className="text-[11px] font-semibold text-[#FF2147]">🎙 Listening…</span>
+      <span className="h-1.5 w-24 overflow-hidden rounded-full bg-slate-200">
+        <span
+          className="block h-full rounded-full bg-[#FF2147] transition-[width] duration-75"
+          style={{ width: `${Math.round((mic.level || 0) * 100)}%` }}
+        />
+      </span>
+    </div>
+  )
+}
+
+function MicButton({ mic }) {
+  if (!mic.supported) return null
+  return (
+    <button
+      type="button"
+      onClick={() => (mic.listening ? mic.stop() : mic.start())}
+      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl transition-colors ${
+        mic.listening ? 'animate-pulse bg-[#FF2147] text-white' : 'bg-slate-100 text-[#1F3A5F] hover:bg-slate-200'
+      }`}
+      aria-label={mic.listening ? 'Stop listening' : 'Speak your answer'}
+    >
+      <MicIcon />
+    </button>
+  )
+}
+
 function isStaleDefaultWelcome(text) {
   return /guest assistant/i.test(text || '')
 }
@@ -86,7 +127,7 @@ export default function CustomerAssistantWidget() {
   const chatMic = useAutoMic((transcript) => {
     if (!transcript) return
     chatMic.stop()
-    submitMessage(transcript)
+    submitMessage(transcript, true)
   })
 
   const roomFlow = useAliceRoomFlow({ hotelId: roomHotelId, active: mode === 'room' && !!roomHotelId })
@@ -137,6 +178,8 @@ export default function CustomerAssistantWidget() {
   }
 
   function handleMinimize() {
+    // A hidden window should never keep talking or listening.
+    stopVoice()
     setOpen(false)
   }
 
@@ -144,6 +187,10 @@ export default function CustomerAssistantWidget() {
     chatMic.stop()
     audioRef.current?.pause()
     window.speechSynthesis?.cancel()
+    // The room-finding conversation has its own microphone and audio, which
+    // this function never touched. Closing the window left Alice talking and
+    // listening to an empty page.
+    roomFlow.stopAll()
   }
 
   function handleClose() {
@@ -162,6 +209,9 @@ export default function CustomerAssistantWidget() {
     setError('')
     setRoomHotelError('')
     setMode('room')
+    // This runs from a real click, which is what browsers require before
+    // audio may play — so Alice can greet the guest aloud here.
+    window.setTimeout(() => roomFlow.startVoice(), 150)
     if (roomHotelId) return
     try {
       const response = await api.get('/hotels')
@@ -205,7 +255,7 @@ export default function CustomerAssistantWidget() {
     setMode('chat')
   }
 
-  async function submitMessage(value) {
+  async function submitMessage(value, viaVoice = false) {
     const trimmed = (value ?? input).trim()
     if (!trimmed || loading) return
 
@@ -229,7 +279,7 @@ export default function CustomerAssistantWidget() {
         setLoading(false)
         setStreamingText('')
         setMessages([...newMessages, { role: 'assistant', content: finalText }])
-        narrateThenListen(finalText, audioRef, true, () => chatMic.start())
+        narrateThenListen(finalText, audioRef, true, () => { if (viaVoice) chatMic.start() })
       },
       onError: () => {
         setLoading(false)
@@ -251,7 +301,7 @@ export default function CustomerAssistantWidget() {
   return (
     <>
       {!open && showTeaser && (
-        <div className="fixed bottom-24 right-6 z-[150] w-[280px] rounded-2xl bg-white p-4 shadow-[0_20px_48px_-8px_rgba(15,23,42,0.3)] ring-1 ring-slate-200/80">
+        <div className="fixed bottom-40 right-6 z-[150] w-[280px] rounded-2xl bg-white p-4 shadow-[0_20px_48px_-8px_rgba(15,23,42,0.3)] ring-1 ring-slate-200/80">
           <button type="button" onClick={dismissTeaser} aria-label="Dismiss" className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-slate-700 text-white shadow hover:bg-slate-900">
             <CloseIcon className="h-3 w-3" />
           </button>
@@ -294,13 +344,13 @@ export default function CustomerAssistantWidget() {
       )}
 
       {!open && (
-        <button type="button" onClick={openWidget} aria-label="Open assistant" className="fixed bottom-6 right-6 z-[150] flex h-16 w-16 items-center justify-center overflow-hidden rounded-full shadow-[0_8px_24px_rgba(31,58,95,0.4)] ring-2 ring-white transition-transform hover:scale-105">
+        <button type="button" onClick={openWidget} aria-label="Open assistant" className="fixed bottom-20 right-6 z-[150] flex h-16 w-16 items-center justify-center overflow-hidden rounded-full shadow-[0_8px_24px_rgba(31,58,95,0.4)] ring-2 ring-white transition-transform hover:scale-105">
           <AliceAvatar />
         </button>
       )}
 
       {open && (
-        <div className="fixed bottom-6 right-6 z-[150] flex h-[600px] w-[390px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_20px_60px_-10px_rgba(15,23,42,0.35)]">
+        <div className="fixed bottom-20 right-6 z-[150] flex h-[min(600px,calc(100vh-6.5rem))] w-[390px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-slate-200/80 bg-white shadow-[0_20px_60px_-10px_rgba(15,23,42,0.35)]">
           <div className="flex items-center justify-between bg-gradient-to-r from-[#1F3A5F] to-[#132840] px-5 py-4">
             <div className="flex items-center gap-3">
               {mode !== 'menu' && (
@@ -401,11 +451,7 @@ export default function CustomerAssistantWidget() {
                 {error && <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[12px] font-medium text-red-700">{error}</div>}
               </div>
 
-              {chatMic.listening && (
-                <p className="bg-white px-4 pt-2 text-center text-[11px] font-semibold text-[#FF2147]">
-                  🎙 Listening… {chatMic.interimText ? `"${chatMic.interimText}"` : ''}
-                </p>
-              )}
+              <MicIndicator mic={chatMic} />
 
               <form onSubmit={handleSend} className="flex items-center gap-2 border-t border-slate-100 bg-white px-3 py-3">
                 <input
@@ -464,29 +510,26 @@ export default function CustomerAssistantWidget() {
                 ))}
               </div>
 
-              {roomFlow.mic.listening && (
-                <p className="bg-white px-4 pt-2 text-center text-[11px] font-semibold text-[#FF2147]">
-                  🎙 Listening… {roomFlow.mic.interimText ? `"${roomFlow.mic.interimText}"` : ''}
-                </p>
-              )}
+              <MicIndicator mic={roomFlow.mic} />
 
               <div className="border-t border-slate-100 bg-white p-3">
                 {roomFlow.step === 'preference' && (
                   <form onSubmit={(e) => { e.preventDefault(); roomFlow.submitPreferenceValue() }} className="flex gap-2">
                     <input value={roomFlow.preference} onChange={(e) => roomFlow.setPreference(e.target.value)} placeholder="A view, a balcony…" className="flex-1 rounded-xl border border-slate-200 px-3.5 py-2.5 text-[13.5px] outline-none focus:border-[#1F3A5F]" />
+                    <MicButton mic={roomFlow.mic} />
                     <button type="submit" disabled={!roomFlow.preference.trim()} className="rounded-xl bg-[#1F3A5F] px-4 py-2.5 text-[13px] font-bold text-white hover:bg-[#162f4d] disabled:opacity-50">Go</button>
                   </form>
                 )}
                 {roomFlow.step === 'checkin' && (
                   <form onSubmit={(e) => { e.preventDefault(); roomFlow.submitCheckInValue() }} className="flex gap-2">
                     <input required min={roomFlow.today} type="date" value={roomFlow.checkIn} onChange={(e) => roomFlow.setCheckIn(e.target.value)} className="flex-1 rounded-xl border border-slate-200 px-3.5 py-2.5 text-[13.5px] outline-none focus:border-[#1F3A5F]" />
-                    <button type="submit" disabled={!roomFlow.checkIn} className="rounded-xl bg-[#1F3A5F] px-4 py-2.5 text-[13px] font-bold text-white hover:bg-[#162f4d] disabled:opacity-50">Go</button>
+                    <MicButton mic={roomFlow.mic} /><button type="submit" disabled={!roomFlow.checkIn} className="rounded-xl bg-[#1F3A5F] px-4 py-2.5 text-[13px] font-bold text-white hover:bg-[#162f4d] disabled:opacity-50">Go</button>
                   </form>
                 )}
                 {roomFlow.step === 'checkout' && (
                   <form onSubmit={(e) => { e.preventDefault(); roomFlow.submitCheckOutValue() }} className="flex gap-2">
                     <input required min={roomFlow.checkIn || roomFlow.today} type="date" value={roomFlow.checkOut} onChange={(e) => roomFlow.setCheckOut(e.target.value)} className="flex-1 rounded-xl border border-slate-200 px-3.5 py-2.5 text-[13.5px] outline-none focus:border-[#1F3A5F]" />
-                    <button type="submit" disabled={!roomFlow.checkOut} className="rounded-xl bg-[#1F3A5F] px-4 py-2.5 text-[13px] font-bold text-white hover:bg-[#162f4d] disabled:opacity-50">Go</button>
+                    <MicButton mic={roomFlow.mic} /><button type="submit" disabled={!roomFlow.checkOut} className="rounded-xl bg-[#1F3A5F] px-4 py-2.5 text-[13px] font-bold text-white hover:bg-[#162f4d] disabled:opacity-50">Go</button>
                   </form>
                 )}
                 {roomFlow.step === 'guests' && (
@@ -494,13 +537,14 @@ export default function CustomerAssistantWidget() {
                     <select value={roomFlow.guests} onChange={(e) => roomFlow.setGuests(Number(e.target.value))} className="flex-1 rounded-xl border border-slate-200 px-3.5 py-2.5 text-[13.5px] outline-none focus:border-[#1F3A5F]">
                       {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} {n === 1 ? 'Guest' : 'Guests'}</option>)}
                     </select>
-                    <button type="submit" className="rounded-xl bg-[#FF2147] px-4 py-2.5 text-[13px] font-bold text-white hover:bg-[#dc1539]">Search</button>
+                    <MicButton mic={roomFlow.mic} /><button type="submit" className="rounded-xl bg-[#FF2147] px-4 py-2.5 text-[13px] font-bold text-white hover:bg-[#dc1539]">Search</button>
                   </form>
                 )}
                 {roomFlow.step === 'searching' && <p className="text-center text-[12px] text-slate-400">Alice is checking availability…</p>}
                 {roomFlow.step === 'results' && roomAllShown.length > 0 && (
                   <form onSubmit={(e) => { e.preventDefault(); roomFlow.submitConfirmValue() }} className="flex gap-2">
                     <input value={roomFlow.confirmText} onChange={(e) => roomFlow.setConfirmText(e.target.value)} placeholder='"yes" or a room number…' className="flex-1 rounded-xl border border-slate-200 px-3.5 py-2.5 text-[13.5px] outline-none focus:border-[#1F3A5F]" />
+                    <MicButton mic={roomFlow.mic} />
                     <button type="submit" disabled={!roomFlow.confirmText.trim()} className="rounded-xl bg-[#1F3A5F] px-4 py-2.5 text-[13px] font-bold text-white hover:bg-[#162f4d] disabled:opacity-50">Go</button>
                   </form>
                 )}

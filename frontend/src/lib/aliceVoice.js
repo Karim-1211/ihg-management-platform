@@ -173,35 +173,52 @@ export function narrateThenListen(text, audioRef, voiceEnabled, onReady) {
 
 // ---------- Listening ----------
 
-const SILENCE_AFTER_SPEECH_MS = 1300
-const NO_SPEECH_TIMEOUT_MS = 9000
-const MAX_RECORDING_MS = 20000
-const SPEECH_LEVEL = 0.014
+const SILENCE_AFTER_SPEECH_MS = 1000
+const NO_SPEECH_TIMEOUT_MS = 8000
+const MAX_RECORDING_MS = 25000
+// Measured per recording rather than fixed: a fixed level was above some
+// microphones' output entirely, so Alice never noticed the guest talking.
+const SPEECH_FLOOR = 0.008
+const SPEECH_OVER_NOISE = 2.5
+const CALIBRATION_MS = 300
+// A recording must contain this much actual speech before it is sent.
+// Whisper invents sentences when given silence, so anything shorter is
+// discarded here rather than answered as if the guest had spoken.
+const MIN_SPEECH_MS = 500
+const MIN_BLOB_BYTES = 4000
+// Two unusable recordings in a row means something is wrong — a muted
+// microphone, a noisy room. Alice stops listening and asks the guest to
+// type, instead of reopening the mic forever.
+const MAX_EMPTY_IN_A_ROW = 2
 
 const MIC_MESSAGES = {
   denied: "I can't use your microphone — please allow microphone access for this site, or type your answer below.",
   noDevice: "I can't find a microphone on this device — please type your answer below.",
   unsupported: "Voice input isn't supported in this browser — please type your answer below.",
+  unheard: "I couldn't hear you clearly — please type your answer below, or tap the microphone to try again.",
   failed: "I'm having trouble hearing you right now — please type your answer below.",
 }
 
 function pickMimeType() {
-  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4', '']
+  const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4']
   for (const type of candidates) {
-    if (!type) return ''
     if (window.MediaRecorder?.isTypeSupported?.(type)) return type
   }
   return ''
 }
 
 // Records the guest's voice in the page and sends it to the backend to be
-// transcribed, instead of using the browser's own voice typing. That
-// depends on a speech service run by the browser's vendor, which stopped
-// working in Chrome without warning and doesn't exist in some browsers.
-// Here the same microphone behaves identically everywhere.
+// transcribed, instead of using the browser's own voice typing — that
+// depends on a service run by the browser's vendor, which stopped working
+// in Chrome without warning and doesn't exist in some browsers.
+//
+// `level` is the live microphone loudness, 0 to 1. Whisper transcribes a
+// finished recording, so there are no partial words to show as the guest
+// speaks; a moving sound bar tells them they are being heard instead.
 export function useAutoMic(onFinalResult) {
   const [listening, setListening] = useState(false)
-  const [interimText, setInterimText] = useState('')
+  const [transcribing, setTranscribing] = useState(false)
+  const [level, setLevel] = useState(0)
   const [error, setError] = useState('')
 
   const supported = typeof window !== 'undefined'
@@ -215,33 +232,39 @@ export function useAutoMic(onFinalResult) {
   const frameRef = useRef(null)
   const timersRef = useRef([])
   const wantedRef = useRef(false)
+  const emptyRunRef = useRef(0)
+  // Counts stop() calls, so a transcription that finishes AFTER Alice was
+  // stopped can be recognised and ignored.
+  const stopCountRef = useRef(0)
   useEffect(() => { callbackRef.current = onFinalResult })
 
   const cleanup = useCallback(() => {
     timersRef.current.forEach((t) => window.clearTimeout(t))
     timersRef.current = []
     if (frameRef.current) { window.cancelAnimationFrame(frameRef.current); frameRef.current = null }
-    try { recorderRef.current?.state === 'recording' && recorderRef.current.stop() } catch { /* already stopped */ }
+    try { if (recorderRef.current?.state === 'recording') recorderRef.current.stop() } catch { /* already stopped */ }
     recorderRef.current = null
     try { contextRef.current?.close() } catch { /* already closed */ }
     contextRef.current = null
     streamRef.current?.getTracks().forEach((track) => track.stop())
     streamRef.current = null
+    setLevel(0)
   }, [])
 
   const stop = useCallback(() => {
+    stopCountRef.current += 1
     wantedRef.current = false
     cleanup()
     setListening(false)
-    setInterimText('')
+    setTranscribing(false)
   }, [cleanup])
 
   const start = useCallback(async () => {
     if (!supported) { setError(MIC_MESSAGES.unsupported); return }
     if (wantedRef.current) return
+    const generation = stopCountRef.current
     wantedRef.current = true
     setError('')
-    setInterimText('')
     setListening(true)
 
     let stream
@@ -274,45 +297,55 @@ export function useAutoMic(onFinalResult) {
     recorderRef.current = recorder
 
     const chunks = []
-    let heardSpeech = false
+    let speechMs = 0
     let finished = false
 
     recorder.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data) }
 
     recorder.onstop = async () => {
       const wasWanted = wantedRef.current
+      const blob = new Blob(chunks, { type: mimeType || 'audio/webm' })
       cleanup()
       setListening(false)
-      setInterimText('')
       if (!wasWanted) return
       wantedRef.current = false
 
-      // Nothing but silence: say nothing and leave the guest to type.
-      if (!heardSpeech || !chunks.length) return
-
-      const blob = new Blob(chunks, { type: mimeType || 'audio/webm' })
-      if (blob.size < 1200) return
+      // Not enough real speech to be worth sending. Saying nothing is far
+      // better than answering a sentence Whisper invented from silence.
+      console.log('[Alice] recording finished:', { speechMs: Math.round(speechMs), bytes: blob.size })
+      if (blob.size < MIN_BLOB_BYTES) {
+        emptyRunRef.current += 1
+        if (emptyRunRef.current >= MAX_EMPTY_IN_A_ROW) setError(MIC_MESSAGES.unheard)
+        return
+      }
 
       try {
-        setInterimText('…')
+        setTranscribing(true)
         const form = new FormData()
         form.append('audio', blob, mimeType.includes('mp4') ? 'speech.mp4' : 'speech.webm')
         const response = await api.post('/ai/transcribe', form)
-        setInterimText('')
+        setTranscribing(false)
         const text = (response.data?.text || '').trim()
-        if (text) callbackRef.current(text)
+        if (!text) {
+          emptyRunRef.current += 1
+          if (emptyRunRef.current >= MAX_EMPTY_IN_A_ROW) setError(MIC_MESSAGES.unheard)
+          return
+        }
+        emptyRunRef.current = 0
+        if (generation !== stopCountRef.current) return
+        callbackRef.current(text)
       } catch (err) {
-        setInterimText('')
+        setTranscribing(false)
         setError(err.response?.data?.detail || MIC_MESSAGES.failed)
       }
     }
 
-    // Stops as soon as the guest has finished speaking, so Alice replies
-    // promptly instead of waiting out a fixed recording length.
+    // Stops as soon as the guest finishes speaking, so Alice replies
+    // promptly rather than waiting out a fixed recording length.
     const finish = () => {
       if (finished) return
       finished = true
-      try { recorder.state === 'recording' && recorder.stop() } catch { /* already stopped */ }
+      try { if (recorder.state === 'recording') recorder.stop() } catch { /* already stopped */ }
     }
 
     try {
@@ -323,31 +356,58 @@ export function useAutoMic(onFinalResult) {
       context.createMediaStreamSource(stream).connect(analyser)
       const samples = new Float32Array(analyser.fftSize)
       let quietSince = 0
+      let lastTick = performance.now()
+      const startedAt = lastTick
+      let noiseSum = 0
+      let noiseCount = 0
+      let threshold = SPEECH_FLOOR
 
       const tick = () => {
         if (finished || !wantedRef.current) return
+        const now = performance.now()
+        const elapsed = now - lastTick
+        lastTick = now
+
         analyser.getFloatTimeDomainData(samples)
         let sum = 0
         for (let i = 0; i < samples.length; i += 1) sum += samples[i] * samples[i]
-        const level = Math.sqrt(sum / samples.length)
+        const loudness = Math.sqrt(sum / samples.length)
+        setLevel(Math.min(1, loudness * 18))
 
-        if (level > SPEECH_LEVEL) {
-          if (!heardSpeech) { heardSpeech = true; setInterimText('') }
+        // The opening moments are the room's own noise, not the guest.
+        if (now - startedAt < CALIBRATION_MS) {
+          noiseSum += loudness
+          noiseCount += 1
+          threshold = Math.max(SPEECH_FLOOR, (noiseSum / noiseCount) * SPEECH_OVER_NOISE)
+          frameRef.current = window.requestAnimationFrame(tick)
+          return
+        }
+
+        if (loudness > threshold) {
+          speechMs += elapsed
           quietSince = 0
-        } else if (heardSpeech) {
-          if (!quietSince) quietSince = Date.now()
-          else if (Date.now() - quietSince > SILENCE_AFTER_SPEECH_MS) { finish(); return }
+        } else if (speechMs >= MIN_SPEECH_MS) {
+          if (!quietSince) quietSince = now
+          else if (now - quietSince > SILENCE_AFTER_SPEECH_MS) {
+            console.log('[Alice] pause detected, sending.', { threshold: threshold.toFixed(4) })
+            finish()
+            return
+          }
         }
         frameRef.current = window.requestAnimationFrame(tick)
       }
       frameRef.current = window.requestAnimationFrame(tick)
     } catch {
-      // No audio analysis available: fall back to a fixed recording length.
-      heardSpeech = true
+      // No audio analysis available: record a fixed stretch instead.
+      speechMs = MIN_SPEECH_MS
       timersRef.current.push(window.setTimeout(finish, 6000))
     }
 
-    timersRef.current.push(window.setTimeout(() => { if (!heardSpeech) finish() }, NO_SPEECH_TIMEOUT_MS))
+    // Only one deadline now. Deciding mid-recording that the guest "isn't
+    // speaking" cut people off repeatedly, because the level that counts as
+    // speech varies by microphone and room. The recording simply runs until
+    // a clear pause, or this limit — and the server discards anything that
+    // turns out to be silence.
     timersRef.current.push(window.setTimeout(finish, MAX_RECORDING_MS))
 
     try {
@@ -360,7 +420,18 @@ export function useAutoMic(onFinalResult) {
 
   useEffect(() => () => { wantedRef.current = false; cleanup() }, [cleanup])
 
-  return { supported, listening, interimText, error, start, stop }
+  // interimText is kept for the existing indicators; Whisper has no
+  // partial results, so it reports the transcription stage instead.
+  return {
+    supported,
+    listening,
+    transcribing,
+    level,
+    interimText: transcribing ? 'Writing that down…' : '',
+    error,
+    start,
+    stop,
+  }
 }
 
 export async function streamAssistant({ message, conversationHistory = [], onDelta, onDone, onError }) {

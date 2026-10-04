@@ -9,8 +9,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@ricky0123/vad-react": "^0.0.37",
     "@tailwindcss/vite": "^4.3.3",
     "axios": "^1.20.0",
+    "onnxruntime-web": "^1.30.0",
     "react": "latest",
     "react-dom": "latest",
     "react-router-dom": "^7.18.3",

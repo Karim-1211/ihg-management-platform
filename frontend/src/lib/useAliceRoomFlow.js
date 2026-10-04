@@ -109,9 +109,37 @@ function parseSpokenGuests(text) {
   return null
 }
 
+// Spoken numbers arrive as words — "three hundred two", "four oh one" —
+// so they are turned back into digits before a room is looked up.
+const SPOKEN_DIGITS = {
+  zero: '0', oh: '0', o: '0', one: '1', two: '2', three: '3', four: '4',
+  five: '5', six: '6', seven: '7', eight: '8', nine: '9',
+}
+
+function digitsFromWords(text) {
+  const found = []
+  let run = ''
+  const flush = () => { if (run) { found.push(run); run = '' } }
+
+  for (const word of text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)) {
+    if (!word) continue
+    if (/^\d+$/.test(word)) { run += word; continue }
+    if (word in SPOKEN_DIGITS) { run += SPOKEN_DIGITS[word]; continue }
+    if (word === 'hundred') { if (run.length === 1) run += '0'; continue }
+    if (word === 'thousand') { continue }
+    flush()
+  }
+  flush()
+  return found
+}
+
 function matchRoomFromText(text, rooms) {
   const normalized = text.trim().toLowerCase()
   if (!normalized || !rooms.length) return null
+
+  const spokenNumbers = digitsFromWords(normalized)
+  const bySpoken = rooms.find((r) => spokenNumbers.some((n) => n.includes(String(r.room_number))))
+  if (bySpoken) return bySpoken
   if (/^(yes|yeah|yep|sure|okay|ok|please|book it|that one|go ahead|correct)\b/.test(normalized) && rooms.length === 1) {
     return rooms[0]
   }
@@ -136,6 +164,7 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
   const hasStartedRef = useRef(false)
   const stepRef = useRef('preference')
   const unclearCountRef = useRef(0)
+  const retryRunRef = useRef(0)
   const lastMicErrorRef = useRef('')
 
   const [voiceEnabled, setVoiceEnabled] = useState(true)
@@ -201,6 +230,7 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
 
   function goTo(nextStep, lineKey) {
     mic.stop()
+    retryRunRef.current = 0
     setStep(nextStep)
     const line = ALICE_ROOM_LINES[lineKey]
     setLog((l) => [...l, { from: 'alice', text: line.text }])
@@ -209,8 +239,18 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
 
   function retry(lineKey, userHeard) {
     mic.stop()
+    // The microphone reopens after an unclear answer at most twice in a
+    // row; after that Alice hands over to the keyboard instead of looping.
+    retryRunRef.current += 1
+    const giveUp = retryRunRef.current > 2
     const line = ALICE_ROOM_LINES[lineKey]
-    setLog((l) => [...l, ...(userHeard ? [{ from: 'user', text: userHeard }] : []), { from: 'alice', text: line.text }])
+    const handOver = "I'm having trouble catching that — please type your answer below, or tap the microphone to try again."
+    setLog((l) => [...l, ...(userHeard ? [{ from: 'user', text: userHeard }] : []), { from: 'alice', text: giveUp ? handOver : line.text }])
+    if (giveUp) {
+      retryRunRef.current = 0
+      narrateThenListen(handOver, activeAudioRef, voiceEnabled, () => {})
+      return
+    }
     speakThenListen(line.file, line.text, activeAudioRef, voiceEnabled, () => mic.start())
   }
 
@@ -372,13 +412,21 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
           }
         }
 
+        // Alice often names the rooms herself. Adding a second line that
+        // announces them again reads as her repeating herself, so it is
+        // only added when her own reply didn't already list them.
+        const alreadyListed = shown.length > 0
+          && shown.filter((r) => finalText.includes(String(r.room_number))).length >= Math.min(2, shown.length)
+
         const prompt = shown.length === 0
           ? ''
-          : shown.length === 1
-            ? `Would you like me to book Room ${shown[0].room_number} for you? Just say "yes," or type it below.`
-            : shown.length <= 3
-              ? `Would you like Room ${shown.map((r) => r.room_number).join(' or Room ')}? Just tell me which one.`
-              : `I've found several lovely options below. Just tell me the room number you'd like, or click "Book This Room" on your favorite.`
+          : alreadyListed
+            ? 'Just tell me the room number you\'d like, or tap "Book This Room".'
+            : shown.length === 1
+              ? `Would you like me to book Room ${shown[0].room_number} for you? Just say "yes," or type it below.`
+              : shown.length <= 3
+                ? `Would you like Room ${shown.map((r) => r.room_number).join(' or Room ')}? Just tell me which one.`
+                : 'I\'ve found several lovely options below. Just tell me the room number you\'d like, or tap "Book This Room".'
 
         await (checkingDonePromise || Promise.resolve())
 
@@ -428,14 +476,21 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
 
     const match = matchRoomFromText(spoken, allShownRooms)
     if (match) {
+      unclearCountRef.current = 0
       const line = `Taking you to checkout for Room ${match.room_number}...`
       setLog((l) => [...l, { from: 'user', text: spoken }, { from: 'alice', text: line }])
       narrateThenListen(line, activeAudioRef, voiceEnabled, () => {})
       window.setTimeout(() => bookRoom(match), 800)
     } else {
-      const line = "I couldn't quite tell which room you meant — say the room number, or type it below."
+      // After two misses, stop reopening the microphone. Repeating the
+      // same question forever is worse than inviting the guest to type.
+      unclearCountRef.current += 1
+      const giveUp = unclearCountRef.current >= 2
+      const line = giveUp
+        ? 'I still didn\'t catch the room number — please type it below, or tap "Book This Room" on the one you like.'
+        : "I couldn't quite tell which room you meant — say the room number, or type it below."
       setLog((l) => [...l, { from: 'user', text: spoken }, { from: 'alice', text: line }])
-      narrateThenListen(line, activeAudioRef, voiceEnabled, () => mic.start())
+      narrateThenListen(line, activeAudioRef, voiceEnabled, () => { if (!giveUp) mic.start() })
     }
   }
 
