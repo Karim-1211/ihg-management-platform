@@ -156,12 +156,21 @@ export default function RoomFinderAssistant({
         )}
 
         {flow.step === 'guests' && (
-          <form onSubmit={(e) => { e.preventDefault(); flow.submitGuestsValue() }} className="flex gap-3">
-            <select value={flow.guests} onChange={(e) => flow.setGuests(Number(e.target.value))} className="flex-1 rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-[#1F3A5F]">
-              {[1, 2, 3, 4, 5, 6].map((n) => <option key={n} value={n}>{n} {n === 1 ? 'Guest' : 'Guests'}</option>)}
-            </select>
-            <button type="submit" className="rounded-xl bg-[#FF2147] px-6 py-3 text-sm font-bold text-white hover:bg-[#dc1539]">Ask Alice</button>
-          </form>
+          <div>
+            <p className="mb-2 text-center text-xs text-slate-400">Tap the number of guests, or say it</p>
+            <div className="grid grid-cols-6 gap-2">
+              {[1, 2, 3, 4, 5, 6].map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => { flow.setGuests(n); flow.submitGuestsValue(n) }}
+                  className="rounded-xl border border-slate-300 py-3 text-base font-bold text-[#1F3A5F] hover:border-[#FF2147] hover:bg-red-50/40"
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
         {flow.step === 'searching' && <p className="text-center text-sm text-slate-400">Alice is checking availability…</p>}

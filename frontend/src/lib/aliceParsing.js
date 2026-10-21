@@ -270,8 +270,10 @@ export function parseSpokenGuests(text) {
   const digit = t.match(/\b(\d{1,2})\b/)
   if (digit) { const n = Number(digit[1]); if (n >= 1 && n <= 6) return n; if (n > 6) return 6 }
 
+  const NEAR = { free: 3, tree: 3, thee: 3, three: 3, fore: 4, fur: 4, fife: 5 }
   for (const w of wordsOf(t)) {
     if (w in ONES && ONES[w] >= 1 && ONES[w] <= 6) return ONES[w]
+    if (w in NEAR) return NEAR[w]
   }
   const beforeNoun = t.match(/\b([a-z]+)\s+(guests?|people|persons?|pax|of us|adults?)\b/)
   if (beforeNoun && HOMOPHONES[beforeNoun[1]] != null) return Math.min(6, HOMOPHONES[beforeNoun[1]])

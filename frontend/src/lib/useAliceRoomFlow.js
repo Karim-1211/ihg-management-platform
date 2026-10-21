@@ -21,7 +21,7 @@ export const ALICE_ROOM_LINES = {
   retryPreference: { file: '/audio/alice-retry-preference.wav', text: "I'm sorry, I didn't quite catch that. Could you tell me a little more about what you're looking for in a room?" },
   retryCheckin: { file: '/audio/alice-retry-checkin.wav', text: "I didn't quite catch that date. Could you tell me your check-in date again?" },
   retryCheckout: { file: '/audio/alice-retry-checkout.wav', text: "I'm sorry, what date would you like to check out?" },
-  retryGuests: { file: '/audio/alice-retry-guests.wav', text: "I didn't catch that — how many guests will be staying?" },
+  retryGuests: { file: '/audio/alice-retry-guests.wav', text: "I didn't catch that — please tap the number of guests below, or say it again." },
 }
 
 export const ALICE_SIGN_IN_LINE = "To check live availability for your dates, I'll just need you to sign in — it only takes a moment, and I'll bring you straight back here."
