@@ -354,9 +354,10 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
       // same question forever is worse than inviting the guest to type.
       unclearCountRef.current += 1
       const giveUp = unclearCountRef.current >= 2
+      const numbers = allShownRooms.slice(0, 4).map((r) => r.room_number).join(', ')
       const line = giveUp
-        ? 'I still didn\'t catch the room number — please type it below, or tap "Book This Room" on the one you like.'
-        : "I couldn't quite tell which room you meant — say the room number, or type it below."
+        ? `I heard "${spoken}", which doesn't match a room I found — please type the number below, or tap "Book This Room" on the one you like.`
+        : `I heard "${spoken}", but I couldn't match it to a room. The rooms I found are ${numbers}. Which one would you like?`
       setLog((l) => [...l, { from: 'user', text: spoken }, { from: 'alice', text: line }])
       narrateThenListen(line, activeAudioRef, voiceEnabled, () => { if (!giveUp) mic.start() })
     }

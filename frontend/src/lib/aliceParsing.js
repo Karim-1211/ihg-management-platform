@@ -121,7 +121,27 @@ export function digitsFromWords(text) {
 
 // ---------- Rooms ----------
 
+// Speech-to-text hears number words as ordinary words: "four oh two" comes
+// back as "for oh two", "three" as "free" or "tree".
+function fixNumberHomophones(text) {
+  return text
+    .replace(/\b(for|fore)\b/g, 'four')
+    .replace(/\b(to|too)\b/g, 'two')
+    .replace(/\b(free|tree|thee)\b/g, 'three')
+    .replace(/\b(won)\b/g, 'one')
+    .replace(/\b(ate)\b/g, 'eight')
+    .replace(/\b(nein|nine?)\b/g, 'nine')
+    .replace(/\b(sex|sics)\b/g, 'six')
+}
+
 export function matchRoomFromText(text, rooms) {
+  const direct = matchRoomOnce(text, rooms)
+  if (direct) return direct
+  const cleaned = fixNumberHomophones(String(text || '').toLowerCase())
+  return cleaned === String(text || '').toLowerCase() ? null : matchRoomOnce(cleaned, rooms)
+}
+
+function matchRoomOnce(text, rooms) {
   const normalized = String(text || '').trim().toLowerCase()
   if (!normalized || !rooms?.length) return null
   const numberOf = (r) => String(r.room_number).toLowerCase()
@@ -186,7 +206,7 @@ function isoDate(year, monthIndex, day) {
 
 // "20th", "twentieth", "twenty second", "twenty two", "5" -> day of month
 function dayFromText(t) {
-  const digit = t.match(/\b(\d{1,2})(?:st|nd|rd|th)?\b/)
+  const digit = t.match(/\b(\d{1,2})(?:st|nd|rd|th|s|n|r|d|t)?\b/)
   if (digit) return Number(digit[1])
   const words = wordsOf(t)
   for (let i = 0; i < words.length; i += 1) {
