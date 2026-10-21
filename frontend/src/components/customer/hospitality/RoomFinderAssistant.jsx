@@ -120,9 +120,10 @@ export default function RoomFinderAssistant({
       {flow.error && <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{flow.error}</div>}
 
       {flow.mic.listening && (
-        <p className="mt-3 text-center text-xs font-semibold text-[#FF2147]">
-          🎙 Listening… {flow.mic.interimText ? `"${flow.mic.interimText}"` : ''}
-        </p>
+        <p className="mt-3 text-center text-xs font-semibold text-[#FF2147]">🎙 Listening… go ahead</p>
+      )}
+      {!flow.mic.listening && flow.mic.transcribing && (
+        <p className="mt-3 text-center text-xs font-semibold text-slate-500">✍️ Writing that down…</p>
       )}
 
       <div className="mt-3 min-h-[96px]">

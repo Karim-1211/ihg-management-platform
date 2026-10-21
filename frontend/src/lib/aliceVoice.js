@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import api from '../services/api'
 
-const POST_SPEECH_BUFFER_MS = 900
+// Echo cancellation keeps Alice's own voice out of the recording, so the
+// microphone can open almost as soon as she finishes.
+const POST_SPEECH_BUFFER_MS = 450
 
 // Alice's recorded clips are in the voice her LOCAL engine uses. On a
 // server that engine isn't installed, so live replies come from a hosted
@@ -171,20 +173,42 @@ export function narrateThenListen(text, audioRef, voiceEnabled, onReady) {
   speak(null, text, audioRef, voiceEnabled, onReady)
 }
 
+// Speaks several pieces one after another, so the first can start playing
+// while the later ones are still to be prepared. onReady runs once, after the
+// last piece finishes naturally; if any piece is cut off, nothing after it
+// ever speaks.
+export function narrateChunks(chunks, audioRef, voiceEnabled, onReady) {
+  const pieces = (chunks || []).filter((c) => c && c.trim())
+  if (!pieces.length) { onReady(); return }
+  const next = (i) => {
+    speak(null, pieces[i], audioRef, voiceEnabled, () => {
+      if (i + 1 < pieces.length) next(i + 1)
+      else onReady()
+    })
+  }
+  next(0)
+}
+
 // ---------- Listening ----------
 
-const SILENCE_AFTER_SPEECH_MS = 1000
+const SILENCE_AFTER_SPEECH_MS = 900
 const NO_SPEECH_TIMEOUT_MS = 8000
 const MAX_RECORDING_MS = 25000
 // Measured per recording rather than fixed: a fixed level was above some
 // microphones' output entirely, so Alice never noticed the guest talking.
 const SPEECH_FLOOR = 0.008
 const SPEECH_OVER_NOISE = 2.5
-const CALIBRATION_MS = 300
+// The threshold is never allowed above this, however loud the first moments
+// were — a guest who starts talking straight away must not be mistaken for
+// the room's background noise.
+const SPEECH_CEILING = 0.03
+const CALIBRATION_MS = 200
+// A sample louder than this during calibration is a voice, not the room.
+const VOICE_DURING_CALIBRATION = 0.04
 // A recording must contain this much actual speech before it is sent.
 // Whisper invents sentences when given silence, so anything shorter is
 // discarded here rather than answered as if the guest had spoken.
-const MIN_SPEECH_MS = 500
+const MIN_SPEECH_MS = 350
 const MIN_BLOB_BYTES = 4000
 // Two unusable recordings in a row means something is wrong — a muted
 // microphone, a noisy room. Alice stops listening and asks the guest to
@@ -265,7 +289,6 @@ export function useAutoMic(onFinalResult) {
     const generation = stopCountRef.current
     wantedRef.current = true
     setError('')
-    setListening(true)
 
     let stream
     try {
@@ -301,10 +324,17 @@ export function useAutoMic(onFinalResult) {
     let finished = false
 
     recorder.ondataavailable = (e) => { if (e.data?.size) chunks.push(e.data) }
+    // "Listening" is shown only once the recorder is genuinely capturing, so
+    // the guest is never invited to speak before the first word can be kept.
+    recorder.onstart = () => { if (wantedRef.current) setListening(true) }
 
     recorder.onstop = async () => {
       const wasWanted = wantedRef.current
       const blob = new Blob(chunks, { type: mimeType || 'audio/webm' })
+      const worthSending = wasWanted && blob.size >= MIN_BLOB_BYTES
+      // Switched on BEFORE listening is switched off, so the guest sees
+      // "Writing that down…" straight away with no blank moment between.
+      if (worthSending) setTranscribing(true)
       cleanup()
       setListening(false)
       if (!wasWanted) return
@@ -320,7 +350,6 @@ export function useAutoMic(onFinalResult) {
       }
 
       try {
-        setTranscribing(true)
         const form = new FormData()
         form.append('audio', blob, mimeType.includes('mp4') ? 'speech.mp4' : 'speech.webm')
         const response = await api.post('/ai/transcribe', form)
@@ -376,9 +405,14 @@ export function useAutoMic(onFinalResult) {
 
         // The opening moments are the room's own noise, not the guest.
         if (now - startedAt < CALIBRATION_MS) {
-          noiseSum += loudness
-          noiseCount += 1
-          threshold = Math.max(SPEECH_FLOOR, (noiseSum / noiseCount) * SPEECH_OVER_NOISE)
+          if (loudness < VOICE_DURING_CALIBRATION) {
+            noiseSum += loudness
+            noiseCount += 1
+            threshold = Math.min(SPEECH_CEILING, Math.max(SPEECH_FLOOR, (noiseSum / noiseCount) * SPEECH_OVER_NOISE))
+          } else {
+            // Already talking: count it as speech, not as background.
+            speechMs += elapsed
+          }
           frameRef.current = window.requestAnimationFrame(tick)
           return
         }

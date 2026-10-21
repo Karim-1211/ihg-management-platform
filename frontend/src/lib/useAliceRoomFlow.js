@@ -2,7 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { requireAuth } from './authRedirect'
-import { useAutoMic, speakThenListen, narrateThenListen, streamAssistant } from './aliceVoice'
+import { useAutoMic, speakThenListen, narrateThenListen, narrateChunks, streamAssistant } from './aliceVoice'
+import {
+  SMALL_TALK_LINES, classifyPreference, parseSpokenDate, parseSpokenGuests,
+  matchRoomFromText, describeResults, splitForSpeech,
+} from './aliceParsing'
 
 export const ALICE_ROOM_LINES = {
   greeting: {
@@ -20,135 +24,7 @@ export const ALICE_ROOM_LINES = {
   retryGuests: { file: '/audio/alice-retry-guests.wav', text: "I didn't catch that — how many guests will be staying?" },
 }
 
-// Replies to everything that ISN'T a room wish. These have no pre-recorded
-// clip, so they are narrated live (or by the browser voice when signed out).
-const SMALL_TALK_LINES = {
-  greeting: "Hello, and welcome! It's lovely to meet you. What kind of room are you hoping for — a view of the mountains or the water, a balcony, a quiet floor?",
-  howAreYou: "I'm very well, thank you for asking — and I hope your day is going beautifully. Now, what kind of room can I find for you?",
-  help: "I can find the right room for you and check live availability. Just tell me what matters most — the view, a balcony, the bed, a quiet floor — and I'll take it from there.",
-  thanks: "My pleasure. Whenever you're ready, tell me what you'd like in a room — a view, a balcony, anything at all.",
-  moveOn: "No problem at all — I'll show you everything that's free. What date would you like to check in?",
-  signInToSearch: "To check live availability for your dates, I'll just need you to sign in — it only takes a moment, and I'll bring you straight back here.",
-}
-
-// Words that mean the guest is describing a room, a stay or a party.
-// Deliberately broad: a real wish wrongly treated as small talk is more
-// annoying than small talk that slips through.
-const ROOM_WORDS = /\b(rooms?|suites?|views?|mountains?|lakes?|ocean|sea|beach|water|city|skyline|garden|balcony|terrace|quiet|calm|peaceful|bed|beds|king|queen|twin|double|single|bath|bathtub|tub|shower|floor|high|top|ground|family|kids|children|child|baby|couple|honeymoon|anniversary|birthday|romantic|business|work|desk|spacious|large|big|small|cozy|cosy|luxury|luxurious|cheap|budget|affordable|price|cost|deluxe|standard|premium|window|sunrise|sunset|guests?|people|persons|adults?|nights?|stay|staying|accessible|wheelchair|pool|spa|breakfast|smoking|pet|pets)\b/
-const PARTY_SIZE = /\b(\d+|one|two|three|four|five|six)\b.*\b(of us|people|persons|guests?|adults?)\b/
-const HOW_ARE_YOU = /\bhow (are|r) (you|u|things)\b|\bhow'?s it going\b|\bhow do you do\b|\bhow have you been\b/
-const GREETING = /^(hi+|hello+|hey+|hiya|howdy|yo|greetings|good (morning|afternoon|evening|day)|salam|assalamu?|as-salamu|hola|bonjour|namaste)\b/
-const HELP = /\b(help|what can you do|who are you|what are you|how does (this|it) work)\b/
-const THANKS = /^(thanks|thank you|thx|cheers|ok|okay|cool|great|nice|fine|good|alright|perfect|sure)\b/
-
-// What kind of message the guest sent at the "what are you looking for"
-// step. A room wish wins over everything else, so "hi, I'd like a sea
-// view" moves straight on rather than getting a hello back.
-function classifyPreference(text) {
-  const t = text.toLowerCase().replace(/[^\p{L}\p{N}\s'$-]/gu, ' ').replace(/\s+/g, ' ').trim()
-  if (!t) return 'unclear'
-  if (ROOM_WORDS.test(t) || PARTY_SIZE.test(t)) return 'room'
-  if (HOW_ARE_YOU.test(t)) return 'howAreYou'
-  if (GREETING.test(t)) return 'greeting'
-  if (HELP.test(t)) return 'help'
-  if (THANKS.test(t)) return 'thanks'
-  return 'unclear'
-}
-
-const MONTHS = ['january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december']
-const NUMBER_WORDS = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6 }
-
-function guessYear(monthIndex, day) {
-  const now = new Date()
-  const candidate = new Date(now.getFullYear(), monthIndex, day)
-  return candidate < now ? now.getFullYear() + 1 : now.getFullYear()
-}
-
-function isoDate(year, monthIndex, day) {
-  const date = new Date(year, monthIndex, day)
-  if (isNaN(date.getTime())) return null
-  return `${year}-${String(monthIndex + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-}
-
-function parseSpokenDate(text) {
-  const normalized = text.toLowerCase().trim()
-
-  const isoMatch = normalized.match(/(\d{4})-(\d{1,2})-(\d{1,2})/)
-  if (isoMatch) return isoDate(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]))
-
-  const slashMatch = normalized.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/)
-  if (slashMatch) {
-    const mm = Number(slashMatch[1]) - 1
-    const dd = Number(slashMatch[2])
-    const year = slashMatch[3] ? (slashMatch[3].length === 2 ? 2000 + Number(slashMatch[3]) : Number(slashMatch[3])) : guessYear(mm, dd)
-    return isoDate(year, mm, dd)
-  }
-
-  for (let i = 0; i < MONTHS.length; i++) {
-    const abbrev = MONTHS[i].slice(0, 3)
-    if (normalized.includes(MONTHS[i]) || new RegExp(`\\b${abbrev}\\b`).test(normalized)) {
-      const dayMatch = normalized.match(/\b(\d{1,2})(st|nd|rd|th)?\b/)
-      if (dayMatch) {
-        const day = Number(dayMatch[1])
-        const yearMatch = normalized.match(/\b(20\d{2})\b/)
-        const year = yearMatch ? Number(yearMatch[1]) : guessYear(i, day)
-        return isoDate(year, i, day)
-      }
-    }
-  }
-  return null
-}
-
-function parseSpokenGuests(text) {
-  const normalized = text.toLowerCase()
-  const digitMatch = normalized.match(/\d+/)
-  if (digitMatch) return Math.min(6, Math.max(1, parseInt(digitMatch[0], 10)))
-  for (const word of Object.keys(NUMBER_WORDS)) {
-    if (new RegExp(`\\b${word}\\b`).test(normalized)) return NUMBER_WORDS[word]
-  }
-  return null
-}
-
-// Spoken numbers arrive as words — "three hundred two", "four oh one" —
-// so they are turned back into digits before a room is looked up.
-const SPOKEN_DIGITS = {
-  zero: '0', oh: '0', o: '0', one: '1', two: '2', three: '3', four: '4',
-  five: '5', six: '6', seven: '7', eight: '8', nine: '9',
-}
-
-function digitsFromWords(text) {
-  const found = []
-  let run = ''
-  const flush = () => { if (run) { found.push(run); run = '' } }
-
-  for (const word of text.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/)) {
-    if (!word) continue
-    if (/^\d+$/.test(word)) { run += word; continue }
-    if (word in SPOKEN_DIGITS) { run += SPOKEN_DIGITS[word]; continue }
-    if (word === 'hundred') { if (run.length === 1) run += '0'; continue }
-    if (word === 'thousand') { continue }
-    flush()
-  }
-  flush()
-  return found
-}
-
-function matchRoomFromText(text, rooms) {
-  const normalized = text.trim().toLowerCase()
-  if (!normalized || !rooms.length) return null
-
-  const spokenNumbers = digitsFromWords(normalized)
-  const bySpoken = rooms.find((r) => spokenNumbers.some((n) => n.includes(String(r.room_number))))
-  if (bySpoken) return bySpoken
-  if (/^(yes|yeah|yep|sure|okay|ok|please|book it|that one|go ahead|correct)\b/.test(normalized) && rooms.length === 1) {
-    return rooms[0]
-  }
-  const byNumber = rooms.find((r) => normalized.includes(String(r.room_number).toLowerCase()))
-  if (byNumber) return byNumber
-  const byType = rooms.find((r) => r.room_type && normalized.includes(r.room_type.toLowerCase()))
-  if (byType) return byType
-  return null
-}
+export const ALICE_SIGN_IN_LINE = "To check live availability for your dates, I'll just need you to sign in — it only takes a moment, and I'll bring you straight back here."
 
 // The complete Alice room-finding conversation, as one reusable engine.
 // `active` lets a caller mount this hook unconditionally (Rules of Hooks)
@@ -341,7 +217,7 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
 
   function confirmThenAdvance(setter, value, submitFn) {
     setter(value)
-    window.setTimeout(() => submitFn(value), 650)
+    window.setTimeout(() => submitFn(value), 300)
   }
 
   function handleVoiceResult(transcript) {
@@ -390,10 +266,9 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
       message,
       onDelta: (text) => { replyTextRef.current += text; setReplyText(replyTextRef.current) },
       onDone: async (event) => {
-        const finalText = replyTextRef.current
+        const aiText = replyTextRef.current
         setStreaming(false)
         setStep('results')
-        setLog((l) => [...l, { from: 'alice', text: finalText }])
         setReplyText('')
 
         const rec = event.room_recommendations
@@ -412,33 +287,24 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
           }
         }
 
-        // Alice often names the rooms herself. Adding a second line that
-        // announces them again reads as her repeating herself, so it is
-        // only added when her own reply didn't already list them.
-        const alreadyListed = shown.length > 0
-          && shown.filter((r) => finalText.includes(String(r.room_number))).length >= Math.min(2, shown.length)
+        // With rooms in hand, Alice's summary is built from the rooms
+        // themselves: instant, short to say, and always in step with the
+        // cards on screen. Her free-form wording is used only when there is
+        // nothing to list.
+        const spokenText = shown.length ? describeResults(shown).text : (aiText || describeResults([]).text)
+        setLog((l) => [...l, { from: 'alice', text: spokenText }])
 
-        const prompt = shown.length === 0
-          ? ''
-          : alreadyListed
-            ? 'Just tell me the room number you\'d like, or tap "Book This Room".'
-            : shown.length === 1
-              ? `Would you like me to book Room ${shown[0].room_number} for you? Just say "yes," or type it below.`
-              : shown.length <= 3
-                ? `Would you like Room ${shown.map((r) => r.room_number).join(' or Room ')}? Just tell me which one.`
-                : 'I\'ve found several lovely options below. Just tell me the room number you\'d like, or tap "Book This Room".'
-
-        await (checkingDonePromise || Promise.resolve())
+        // The "checking" line is only waited for briefly. Results that are
+        // ready should be heard now, not after a pleasantry has finished.
+        await Promise.race([
+          checkingDonePromise || Promise.resolve(),
+          new Promise((resolve) => window.setTimeout(resolve, 1200)),
+        ])
 
         setPreparingVoice(true)
-        narrateThenListen(finalText, activeAudioRef, voiceEnabled, () => {
+        narrateChunks(splitForSpeech(spokenText), activeAudioRef, voiceEnabled, () => {
           setPreparingVoice(false)
-          if (prompt) {
-            setLog((l) => [...l, { from: 'alice', text: prompt }])
-            narrateThenListen(prompt, activeAudioRef, voiceEnabled, () => mic.start())
-          } else {
-            mic.start()
-          }
+          mic.start()
         })
       },
       onError: (message) => {
@@ -477,10 +343,12 @@ export function useAliceRoomFlow({ hotelId, defaultCheckIn = '', defaultCheckOut
     const match = matchRoomFromText(spoken, allShownRooms)
     if (match) {
       unclearCountRef.current = 0
-      const line = `Taking you to checkout for Room ${match.room_number}...`
+      const line = `Taking you to checkout for Room ${match.room_number}.`
       setLog((l) => [...l, { from: 'user', text: spoken }, { from: 'alice', text: line }])
-      narrateThenListen(line, activeAudioRef, voiceEnabled, () => {})
-      window.setTimeout(() => bookRoom(match), 800)
+      // Navigate only when she has FINISHED the sentence. With the voice
+      // off, the callback runs at once. If the guest interrupts, it never
+      // runs, so a cancelled sentence cannot still move the page.
+      narrateThenListen(line, activeAudioRef, voiceEnabled, () => bookRoom(match))
     } else {
       // After two misses, stop reopening the microphone. Repeating the
       // same question forever is worse than inviting the guest to type.
