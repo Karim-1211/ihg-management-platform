@@ -45,7 +45,7 @@ _HALLUCINATIONS = {
     "thank you for watching", "bye", "bye bye", "goodbye", "okay", "ok",
     "subtitles by the amara.org community", "amara.org", "please subscribe",
     "like and subscribe", "music", "applause", "silence", "beep", "uh", "um", "mm",
-    "hello", "hi", "so lets go", "so let's go", "hotel guest", "a hotel guest",
+    "oh", "ah", "hmm", "huh", "er", "eh", "hello", "hi", "so lets go", "so let's go", "hotel guest", "a hotel guest",
 }
 
 
